@@ -95,4 +95,4 @@ poetry.lock
 # Additional files and directories to ignore (put below)
 docs/api/
 *_output.txt
-
+uv.lock

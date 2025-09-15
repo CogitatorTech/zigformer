@@ -1,0 +1,131 @@
+const std = @import("std");
+const lib = @import("../lib.zig");
+const linalg = lib.linalg;
+const Matrix = linalg.Matrix;
+const Adam = lib.optimizer.Adam;
+const layer = lib.layer;
+
+pub const FeedForward = struct {
+    allocator: std.mem.Allocator,
+    w1: Matrix,
+    b1: Matrix,
+    w2: Matrix,
+    b2: Matrix,
+
+    has_cache: bool,
+    cached_input: Matrix,
+    cached_hidden_pre: Matrix,
+    cached_hidden_post: Matrix,
+
+    optimizer_w1: Adam,
+    optimizer_b1: Adam,
+    optimizer_w2: Adam,
+    optimizer_b2: Adam,
+
+    pub fn init(allocator: std.mem.Allocator, embedding_dim: usize, hidden_dim: usize) !*FeedForward {
+        const self = try allocator.create(FeedForward);
+        const std_w1 = std.math.sqrt(2.0 / @as(f32, @floatFromInt(embedding_dim)));
+        const std_w2 = std.math.sqrt(2.0 / @as(f32, @floatFromInt(hidden_dim)));
+
+        self.* = .{
+            .allocator = allocator,
+            .w1 = try Matrix.initRandom(allocator, embedding_dim, hidden_dim, 0.0, std_w1),
+            .b1 = try Matrix.initZeros(allocator, 1, hidden_dim),
+            .w2 = try Matrix.initRandom(allocator, hidden_dim, embedding_dim, 0.0, std_w2),
+            .b2 = try Matrix.initZeros(allocator, 1, embedding_dim),
+            .has_cache = false,
+            .cached_input = undefined,
+            .cached_hidden_pre = undefined,
+            .cached_hidden_post = undefined,
+            .optimizer_w1 = try Adam.init(allocator, embedding_dim, hidden_dim),
+            .optimizer_b1 = try Adam.init(allocator, 1, hidden_dim),
+            .optimizer_w2 = try Adam.init(allocator, hidden_dim, embedding_dim),
+            .optimizer_b2 = try Adam.init(allocator, 1, embedding_dim),
+        };
+        return self;
+    }
+
+    pub fn deinit(self: *FeedForward) void {
+        self.w1.deinit();
+        self.b1.deinit();
+        self.w2.deinit();
+        self.b2.deinit();
+        if (self.has_cache) {
+            self.cached_input.deinit();
+            self.cached_hidden_pre.deinit();
+            self.cached_hidden_post.deinit();
+        }
+        self.optimizer_w1.deinit();
+        self.optimizer_b1.deinit();
+        self.optimizer_w2.deinit();
+        self.optimizer_b2.deinit();
+        self.allocator.destroy(self);
+    }
+
+    fn relu(mat: *Matrix) void {
+        for (mat.data) |*val| val.* = @max(0.0, val.*);
+    }
+
+    pub fn forward(self: *FeedForward, input: Matrix) !Matrix {
+        if (self.has_cache) {
+            self.cached_input.deinit();
+            self.cached_hidden_pre.deinit();
+            self.cached_hidden_post.deinit();
+        }
+        self.cached_input = try input.clone();
+        self.has_cache = true;
+
+        self.cached_hidden_pre = try self.cached_input.dot(&self.w1);
+        self.cached_hidden_post = try self.cached_hidden_pre.clone();
+        relu(&self.cached_hidden_post);
+
+        var output = try self.cached_hidden_post.dot(&self.w2);
+        const final_output = try output.add(&input);
+        output.deinit();
+        return final_output;
+    }
+
+    pub fn backward(self: *FeedForward, grads: Matrix, lr: f32) !Matrix {
+        var mut_grads = grads;
+        defer mut_grads.deinit();
+
+        var grad_w2 = try self.cached_hidden_post.transpose();
+        var final_grad_w2 = try grad_w2.dot(&mut_grads);
+        grad_w2.deinit();
+        defer final_grad_w2.deinit();
+
+        var w2_t = try self.w2.transpose();
+        defer w2_t.deinit();
+        var grad_hidden_post = try mut_grads.dot(&w2_t);
+        defer grad_hidden_post.deinit();
+
+        for (grad_hidden_post.data, self.cached_hidden_pre.data) |*g, pre| {
+            if (pre <= 0) g.* = 0;
+        }
+
+        var grad_w1 = try self.cached_input.transpose();
+        var final_grad_w1 = try grad_w1.dot(&grad_hidden_post);
+        grad_w1.deinit();
+        defer final_grad_w1.deinit();
+
+        var w1_t = try self.w1.transpose();
+        defer w1_t.deinit();
+        var grad_input_ff = try grad_hidden_post.dot(&w1_t);
+        defer grad_input_ff.deinit();
+
+        const grad_input = try grad_input_ff.add(&mut_grads);
+
+        self.optimizer_w2.step(&self.w2, final_grad_w2, lr);
+        self.optimizer_w1.step(&self.w1, final_grad_w1, lr);
+
+        return grad_input;
+    }
+
+    pub fn parameters(self: *const FeedForward) usize {
+        return self.w1.data.len + self.b1.data.len + self.w2.data.len + self.b2.data.len;
+    }
+
+    pub fn toLayer(self: *FeedForward) layer.Layer {
+        return layer.toLayer(FeedForward)(self);
+    }
+};
