@@ -6,19 +6,12 @@ BUILD_TYPE    ?= Debug
 BUILD_OPTS      = -Doptimize=$(BUILD_TYPE)
 JOBS          ?= $(shell nproc || echo 2)
 SRC_DIR       := src
-EXAMPLES_DIR  := examples
 BUILD_DIR     := zig-out
 CACHE_DIR     := .zig-cache
-BINARY_NAME   := example
+BINARY_NAME   := zigformer-cli
 RELEASE_MODE := ReleaseSafe
-TEST_FLAGS := --summary all --verbose
+TEST_FLAGS := --summary all #--verbose
 JUNK_FILES := *.o *.obj *.dSYM *.dll *.so *.dylib *.a *.lib *.pdb temp/
-
-# Automatically find all example names
-ZIG_EXAMPLES  := $(patsubst %.zig,%,$(notdir $(wildcard examples/zig/*.zig)))
-ELZ_EXAMPLES  := $(wildcard examples/elz/*.elz)
-EXAMPLE       ?= all
-ELZ_EXAMPLE   ?= all
 
 SHELL         := /usr/bin/env bash
 .SHELLFLAGS   := -eu -o pipefail -c
@@ -101,7 +94,7 @@ clean: ## Remove docs, build artifacts, and cache directories
 
 lint: ## Check code style and formatting of Zig files
 	@echo "Running code style checks..."
-	@$(ZIG) fmt --check $(SRC_DIR) $(EXAMPLES_DIR)
+	@$(ZIG) fmt --check $(SRC_DIR)
 
 format: ## Format Zig files
 	@echo "Formatting Zig files..."

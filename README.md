@@ -1,6 +1,6 @@
 <div align="center">
   <picture>
-    <img alt="ZigFormer Logo" src="logo.svg" height="35%" width="35%">
+    <img alt="ZigFormer Logo" src="logo.svg" height="25%" width="25%">
   </picture>
 <br>
 
@@ -10,7 +10,7 @@
 [![License](https://img.shields.io/badge/license-MIT-007ec6?label=license&style=flat&labelColor=282c34&logo=open-source-initiative)](https://github.com/habedi/zigformer/blob/main/LICENSE)
 [![Docs](https://img.shields.io/badge/docs-view-blue?style=flat&labelColor=282c34&logo=read-the-docs)](https://habedi.github.io/zigformer/)
 [![Examples](https://img.shields.io/badge/examples-view-green?style=flat&labelColor=282c34&logo=zig)](https://github.com/habedi/zigformer/tree/main/examples)
-[![Zig Version](https://img.shields.io/badge/Zig-0.14.1-orange?logo=zig&labelColor=282c34)](https://ziglang.org/download/)
+[![Zig Version](https://img.shields.io/badge/Zig-0.15.1-orange?logo=zig&labelColor=282c34)](https://ziglang.org/download/)
 [![Release](https://img.shields.io/github/release/habedi/zigformer.svg?label=release&style=flat&labelColor=282c34&logo=github)](https://github.com/habedi/zigformer/releases/latest)
 
 An educational transformer-based LLM implementation in pure Zig
@@ -82,4 +82,4 @@ ZigFormer is licensed under the MIT License (see [LICENSE](LICENSE)).
 
 ### Acknowledgements
 
-* The logo is from [SVG Repo](https://www.svgrepo.com/svg/532646/hat-witch) with some modifications.
+* The logo is from [SVG Repo](https://www.svgrepo.com/svg/357414/brain) with some modifications.

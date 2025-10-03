@@ -29,6 +29,11 @@ pub fn build(b: *std.Build) void {
     });
     cli_module.addImport("zigformer", zigformer_mod);
 
+    // Wire Chilli dependency into the CLI module
+    const chilli_dep = b.dependency("chilli", .{});
+    const chilli_module = chilli_dep.module("chilli");
+    cli_module.addImport("chilli", chilli_module);
+
     // Create the executable artifact from the module.
     const exe = b.addExecutable(.{
         .name = "zigformer-cli",
