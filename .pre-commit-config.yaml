@@ -29,7 +29,7 @@ repos:
         stages: [ pre-commit ]
 
       - id: lint
-        name: Check code Style
+        name: Check Code Style
         entry: make lint
         language: system
         pass_filenames: false
