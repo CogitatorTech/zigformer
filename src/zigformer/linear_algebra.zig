@@ -30,7 +30,8 @@ pub const Matrix = struct {
         std_dev: f32,
     ) !Matrix {
         const mat = try init(allocator, rows, cols);
-        var prng = std.Random.DefaultPrng.init(0);
+        const seed = @as(u64, @intCast(std.time.nanoTimestamp()));
+        var prng = std.Random.DefaultPrng.init(seed);
         const rand = prng.random();
         for (mat.data) |*val| {
             val.* = rand.float(f32) * std_dev + mean;

@@ -66,6 +66,15 @@ pub const FeedForward = struct {
         for (mat.data) |*val| val.* = @max(0.0, val.*);
     }
 
+    fn addBias(mat: *Matrix, bias: *const Matrix) void {
+        for (0..mat.rows) |r| {
+            const row_slice = mat.data[r * mat.cols .. (r + 1) * mat.cols];
+            for (row_slice, bias.data) |*val, b| {
+                val.* += b;
+            }
+        }
+    }
+
     pub fn forward(self: *FeedForward, input: Matrix) !Matrix {
         if (self.has_cache) {
             self.cached_input.deinit();
@@ -76,10 +85,12 @@ pub const FeedForward = struct {
         self.has_cache = true;
 
         self.cached_hidden_pre = try self.cached_input.dot(&self.w1);
+        addBias(&self.cached_hidden_pre, &self.b1);
         self.cached_hidden_post = try self.cached_hidden_pre.clone();
         relu(&self.cached_hidden_post);
 
         var output = try self.cached_hidden_post.dot(&self.w2);
+        addBias(&output, &self.b2);
         const final_output = try output.add(&input);
         output.deinit();
         return final_output;
@@ -93,6 +104,15 @@ pub const FeedForward = struct {
         var final_grad_w2 = try grad_w2.dot(&mut_grads);
         grad_w2.deinit();
         defer final_grad_w2.deinit();
+
+        var grad_b2 = try Matrix.initZeros(self.allocator, 1, self.b2.cols);
+        defer grad_b2.deinit();
+        for (0..mut_grads.rows) |r| {
+            const row_slice = mut_grads.data[r * mut_grads.cols .. (r + 1) * mut_grads.cols];
+            for (grad_b2.data, row_slice) |*gb, g| {
+                gb.* += g;
+            }
+        }
 
         var w2_t = try self.w2.transpose();
         defer w2_t.deinit();
@@ -108,6 +128,15 @@ pub const FeedForward = struct {
         grad_w1.deinit();
         defer final_grad_w1.deinit();
 
+        var grad_b1 = try Matrix.initZeros(self.allocator, 1, self.b1.cols);
+        defer grad_b1.deinit();
+        for (0..grad_hidden_post.rows) |r| {
+            const row_slice = grad_hidden_post.data[r * grad_hidden_post.cols .. (r + 1) * grad_hidden_post.cols];
+            for (grad_b1.data, row_slice) |*gb, g| {
+                gb.* += g;
+            }
+        }
+
         var w1_t = try self.w1.transpose();
         defer w1_t.deinit();
         var grad_input_ff = try grad_hidden_post.dot(&w1_t);
@@ -116,7 +145,9 @@ pub const FeedForward = struct {
         const grad_input = try grad_input_ff.add(&mut_grads);
 
         self.optimizer_w2.step(&self.w2, final_grad_w2, lr);
+        self.optimizer_b2.step(&self.b2, grad_b2, lr);
         self.optimizer_w1.step(&self.w1, final_grad_w1, lr);
+        self.optimizer_b1.step(&self.b1, grad_b1, lr);
 
         return grad_input;
     }
