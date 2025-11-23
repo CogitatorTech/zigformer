@@ -2,28 +2,36 @@ name: Run Linter Checks
 
 on:
   workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
   pull_request:
     branches:
       - main
-    tags:
-      - 'v*'
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
 
 permissions:
   contents: read
 
 jobs:
-  lint:
+  lints:
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
+      - name: Install Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: '0.15.2'
+
       - name: Install Dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y make
-          make install-deps
 
       - name: Run Linters
         run: make lint
