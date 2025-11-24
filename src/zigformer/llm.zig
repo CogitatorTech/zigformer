@@ -15,20 +15,29 @@ pub const LLM = struct {
 
     pub fn init(allocator: std.mem.Allocator, vocab: Vocab) !LLM {
         var network = std.ArrayList(Layer){};
+        errdefer {
+            for (network.items) |layer| {
+                layer.deinit();
+            }
+            network.deinit(allocator);
+        }
 
         const embedding_dim = lib.config.embedding_dim;
         const hidden_dim = lib.config.hidden_dim;
 
         const embeddings = try Embeddings.init(allocator, vocab.size());
-        const transformer1 = try TransformerBlock.init(allocator, embedding_dim, hidden_dim);
-        const transformer2 = try TransformerBlock.init(allocator, embedding_dim, hidden_dim);
-        const transformer3 = try TransformerBlock.init(allocator, embedding_dim, hidden_dim);
-        const output_projection = try OutputProjection.init(allocator, embedding_dim, vocab.size());
-
         try network.append(allocator, embeddings.toLayer());
+
+        const transformer1 = try TransformerBlock.init(allocator, embedding_dim, hidden_dim);
         try network.append(allocator, transformer1.toLayer());
+
+        const transformer2 = try TransformerBlock.init(allocator, embedding_dim, hidden_dim);
         try network.append(allocator, transformer2.toLayer());
+
+        const transformer3 = try TransformerBlock.init(allocator, embedding_dim, hidden_dim);
         try network.append(allocator, transformer3.toLayer());
+
+        const output_projection = try OutputProjection.init(allocator, embedding_dim, vocab.size());
         try network.append(allocator, output_projection.toLayer());
 
         return LLM{
@@ -210,8 +219,9 @@ pub const LLM = struct {
                 if (training_row.items.len < 2) continue;
                 processed_count += 1;
 
-                const input_ids = training_row.items[0 .. training_row.items.len - 1];
-                const target_ids = training_row.items[1..];
+                const len = @min(training_row.items.len, lib.config.max_seq_len + 1);
+                const input_ids = training_row.items[0 .. len - 1];
+                const target_ids = training_row.items[1..len];
 
                 var input_matrix = try Matrix.init(self.allocator, 1, input_ids.len);
                 defer input_matrix.deinit();

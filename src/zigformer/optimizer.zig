@@ -11,6 +11,8 @@ pub const Adam = struct {
     v: Matrix,
     allocator: std.mem.Allocator,
 
+    clip_threshold: f32 = 1.0,
+
     pub fn init(allocator: std.mem.Allocator, rows: usize, cols: usize) !Adam {
         return Adam{
             .m = try Matrix.initZeros(allocator, rows, cols),
@@ -26,6 +28,19 @@ pub const Adam = struct {
 
     pub fn step(self: *Adam, params: *Matrix, grads: Matrix, lr: f32) void {
         self.timestep += 1;
+
+        // Gradient Clipping
+        var sum_sq: f32 = 0.0;
+        for (grads.data) |g| {
+            sum_sq += g * g;
+        }
+        const norm = std.math.sqrt(sum_sq);
+        if (norm > self.clip_threshold) {
+            const scale = self.clip_threshold / (norm + 1e-6);
+            for (grads.data) |*g| {
+                g.* *= scale;
+            }
+        }
 
         for (self.m.data, grads.data) |*m_val, g_val| {
             m_val.* = self.beta1 * m_val.* + (1.0 - self.beta1) * g_val;

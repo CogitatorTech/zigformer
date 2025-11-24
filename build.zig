@@ -17,6 +17,7 @@ pub fn build(b: *std.Build) void {
     config_options.addOption(usize, "embedding_dim", 128);
     config_options.addOption(usize, "hidden_dim", 256);
     config_options.addOption(usize, "max_seq_len", 80);
+    config_options.addOption(usize, "num_heads", 4);
 
     // Add the options to the library module under the name "config".
     zigformer_mod.addOptions("config", config_options);
@@ -62,4 +63,17 @@ pub fn build(b: *std.Build) void {
     const test_run_cmd = b.addRunArtifact(test_exe);
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&test_run_cmd.step);
+
+    // Create a "docs" step to generate documentation.
+    const docs_step = b.step("docs", "Generate documentation");
+    const docs_obj = b.addObject(.{
+        .name = "zigformer",
+        .root_module = zigformer_mod,
+    });
+    const install_docs = b.addInstallDirectory(.{
+        .source_dir = docs_obj.getEmittedDocs(),
+        .install_dir = .prefix,
+        .install_subdir = "docs",
+    });
+    docs_step.dependOn(&install_docs.step);
 }

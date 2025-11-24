@@ -6,68 +6,43 @@
 
 <h2>ZigFormer</h2>
 
-[![Tests](https://img.shields.io/github/actions/workflow/status/habedi/zigformer/tests.yml?label=tests&style=flat&labelColor=282c34&logo=github)](https://github.com/habedi/zigformer/actions/workflows/tests.yml)
-[![License](https://img.shields.io/badge/license-MIT-007ec6?label=license&style=flat&labelColor=282c34&logo=open-source-initiative)](https://github.com/habedi/zigformer/blob/main/LICENSE)
-[![Docs](https://img.shields.io/badge/docs-view-blue?style=flat&labelColor=282c34&logo=read-the-docs)](https://habedi.github.io/zigformer/)
-[![Examples](https://img.shields.io/badge/examples-view-green?style=flat&labelColor=282c34&logo=zig)](https://github.com/habedi/zigformer/tree/main/examples)
-[![Zig Version](https://img.shields.io/badge/Zig-0.15.1-orange?logo=zig&labelColor=282c34)](https://ziglang.org/download/)
-[![Release](https://img.shields.io/github/release/habedi/zigformer.svg?label=release&style=flat&labelColor=282c34&logo=github)](https://github.com/habedi/zigformer/releases/latest)
+[![Tests](https://img.shields.io/github/actions/workflow/status/CogitatorTech/zigformer/tests.yml?label=tests&style=flat&labelColor=282c34&logo=github)](https://github.com/CogitatorTech/zigformer/actions/workflows/tests.yml)
+[![License](https://img.shields.io/badge/license-MIT-007ec6?label=license&style=flat&labelColor=282c34&logo=open-source-initiative)](https://github.com/CogitatorTech/zigformer/blob/main/LICENSE)
+[![Docs](https://img.shields.io/badge/docs-read-blue?style=flat&labelColor=282c34&logo=read-the-docs)](https://CogitatorTech.github.io/zigformer/)
+[![Examples](https://img.shields.io/badge/examples-view-green?style=flat&labelColor=282c34&logo=zig)](https://github.com/CogitatorTech/zigformer/tree/main/examples)
+[![Zig Version](https://img.shields.io/badge/Zig-0.15.2-orange?logo=zig&labelColor=282c34)](https://ziglang.org/download/)
+[![Release](https://img.shields.io/github/release/CogitatorTech/zigformer.svg?label=release&style=flat&labelColor=282c34&logo=github)](https://github.com/CogitatorTech/zigformer/releases/latest)
 
 An educational transformer-based LLM implementation in pure Zig
 
 </div>
 
-ZigFormer is an implementation of a Transformer-based language model written in pure [Zig](https://ziglang.org/).  
-It is inspired by [RustGPT](https://github.com/tekaratzas/RustGPT) and serves both as an educational project and a playground for experimenting
-with transformers outside of heavy ML frameworks.
+---
+
+ZigFormer is a fully functional implementation of a Transformer-based large language model (LLM) written in Zig
+programming language.
+
+### Features
+
+To be added.
+
+See the [ROADMAP.md](ROADMAP.md) for the list of implemented and planned features.
+
+> [!IMPORTANT]
+> This project is in early development, so bugs and breaking changes are expected.
+> Please use the [issues page](https://github.com/CogitatorTech/zigformer/issues) to report bugs or request features.
 
 ---
 
-### What This Is
+### Quickstart
 
-ZigFormer demonstrates how to build and train a simple LLM in pure Zig:
-
-- Tokenization and vocabulary building  
-- Embedding layers  
-- Transformer blocks (multi-head self-attention + feed-forward)  
-- Layer normalization  
-- Output projection for vocabulary prediction  
-- Training loop with Adam optimizer and gradient clipping  
-- Interactive chat mode  
-
-The goal is clarity and modularity — not raw performance (yet).  
+To be added.
 
 ---
 
-### Development
+### Documentation
 
-```sh
-# Run tests
-zig build test
-
-# Build optimized release
-zig build -Drelease-fast
-````
-
-If you prefer Make:
-
-```sh
-# Install dev deps (Debian example)
-sudo apt-get install make
-make install-deps
-
-# Run common tasks
-make help
-```
-
----
-
-### Interactive Mode (after training)
-
-```
-> How do mountains form?
-Mountains are formed through tectonic forces or volcanism over long geological time periods.
-```
+To be added.
 
 ---
 

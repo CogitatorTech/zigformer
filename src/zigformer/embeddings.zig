@@ -50,7 +50,7 @@ pub const Embeddings = struct {
             @memcpy(token_embeds.data[i * token_embeds.cols .. (i + 1) * token_embeds.cols], row);
         }
 
-        var pos_embeds = try Matrix.init(self.allocator, seq_len, lib.config.embedding_dim);
+        var pos_embeds = try Matrix.initZeros(self.allocator, seq_len, lib.config.embedding_dim);
         const clamped_seq_len = @min(seq_len, lib.config.max_seq_len);
         const pos_data = self.positional_embeddings.data[0 .. clamped_seq_len * lib.config.embedding_dim];
         @memcpy(pos_embeds.data, pos_data);
