@@ -5,6 +5,7 @@ pub const Vocab = struct {
     encode_map: std.StringHashMap(u32),
     decode_map: std.AutoHashMap(u32, []const u8),
     words: std.ArrayList([]const u8),
+    owns_words: bool, // true if words were allocated by load(), false if references from build()
 
     pub fn init(allocator: std.mem.Allocator) Vocab {
         return Vocab{
@@ -12,10 +13,17 @@ pub const Vocab = struct {
             .encode_map = std.StringHashMap(u32).init(allocator),
             .decode_map = std.AutoHashMap(u32, []const u8).init(allocator),
             .words = std.ArrayList([]const u8){},
+            .owns_words = false,
         };
     }
 
     pub fn deinit(self: *Vocab) void {
+        // Free allocated words if we own them
+        if (self.owns_words) {
+            for (self.words.items) |word| {
+                self.allocator.free(word);
+            }
+        }
         self.encode_map.deinit();
         self.decode_map.deinit();
         self.words.deinit(self.allocator);
@@ -63,6 +71,9 @@ pub const Vocab = struct {
         // Read each word
         var word_list = std.ArrayList([]const u8){};
         defer word_list.deinit(allocator);
+        errdefer {
+            for (word_list.items) |w| allocator.free(w);
+        }
 
         for (0..vocab_size) |_| {
             const word_len = try reader.readInt(usize, .little);
@@ -74,6 +85,7 @@ pub const Vocab = struct {
         }
 
         try vocab.build(word_list.items);
+        vocab.owns_words = true; // We allocated these words, so we own them
         return vocab;
     }
 };
@@ -90,4 +102,31 @@ test "Vocab init and build" {
     try std.testing.expectEqual(@as(?u32, 0), vocab.encode("hello"));
     try std.testing.expectEqualStrings("world", vocab.decode(1).?);
     try std.testing.expect(vocab.encode("zig") == null);
+}
+
+test "Vocab load and save memory safety" {
+    const allocator = std.testing.allocator;
+
+    // Create and save a vocab
+    var vocab1 = Vocab.init(allocator);
+    defer vocab1.deinit();
+
+    const words = &[_][]const u8{ "hello", "world", "</s>" };
+    try vocab1.build(words);
+
+    // Save to buffer
+    var buffer = std.ArrayList(u8){};
+    defer buffer.deinit(allocator);
+    const writer = buffer.writer(allocator);
+    try vocab1.save(writer);
+
+    // Load from buffer
+    var stream = std.io.fixedBufferStream(buffer.items);
+    const reader = stream.reader();
+    var vocab2 = try Vocab.load(allocator, reader);
+    defer vocab2.deinit(); // This should properly free allocated words
+
+    // Verify loaded vocab works
+    try std.testing.expectEqual(@as(usize, 3), vocab2.size());
+    try std.testing.expectEqual(@as(?u32, 0), vocab2.encode("hello"));
 }

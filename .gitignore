@@ -96,3 +96,4 @@ poetry.lock
 docs/api/
 *_output.txt
 uv.lock
+*.bin

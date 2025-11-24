@@ -5,6 +5,7 @@ pub const linalg = @import("zigformer/linear_algebra.zig");
 pub const vocab = @import("zigformer/vocab.zig");
 pub const optimizer = @import("zigformer/optimizer.zig");
 pub const lr_scheduler = @import("zigformer/lr_scheduler.zig");
+pub const parallel = @import("zigformer/parallel.zig");
 pub const layer = @import("zigformer/layer.zig");
 pub const embeddings = @import("zigformer/embeddings.zig");
 pub const layer_norm = @import("zigformer/layer_normalization.zig");

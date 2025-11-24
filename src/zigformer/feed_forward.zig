@@ -159,4 +159,93 @@ pub const FeedForward = struct {
     pub fn toLayer(self: *FeedForward) layer.Layer {
         return layer.toLayer(FeedForward)(self);
     }
+
+    pub fn save(self: *const FeedForward, writer: anytype) !void {
+        try self.w1.save(writer);
+        try self.b1.save(writer);
+        try self.w2.save(writer);
+        try self.b2.save(writer);
+    }
+
+    pub fn load(allocator: std.mem.Allocator, reader: anytype) !*FeedForward {
+        const self = try allocator.create(FeedForward);
+        errdefer allocator.destroy(self);
+
+        var w1 = try Matrix.load(allocator, reader);
+        errdefer w1.deinit();
+
+        var b1 = try Matrix.load(allocator, reader);
+        errdefer b1.deinit();
+
+        var w2 = try Matrix.load(allocator, reader);
+        errdefer w2.deinit();
+
+        var b2 = try Matrix.load(allocator, reader);
+        errdefer b2.deinit();
+
+        self.* = .{
+            .allocator = allocator,
+            .w1 = w1,
+            .b1 = b1,
+            .w2 = w2,
+            .b2 = b2,
+            .has_cache = false,
+            .cached_input = undefined,
+            .cached_hidden_pre = undefined,
+            .cached_hidden_post = undefined,
+            .optimizer_w1 = try Adam.init(allocator, w1.rows, w1.cols),
+            .optimizer_b1 = try Adam.init(allocator, b1.rows, b1.cols),
+            .optimizer_w2 = try Adam.init(allocator, w2.rows, w2.cols),
+            .optimizer_b2 = try Adam.init(allocator, b2.rows, b2.cols),
+        };
+        return self;
+    }
 };
+test "FeedForward" {
+    const allocator = std.testing.allocator;
+    const embedding_dim = 16;
+    const hidden_dim = 32;
+
+    var ff = try FeedForward.init(allocator, embedding_dim, hidden_dim);
+    defer ff.deinit();
+
+    // Test Forward
+    var input = try Matrix.initRandom(allocator, 2, embedding_dim, 0.0, 1.0);
+    defer input.deinit();
+
+    var output = try ff.forward(input);
+    defer output.deinit();
+
+    try std.testing.expectEqual(input.rows, output.rows);
+    try std.testing.expectEqual(input.cols, output.cols);
+
+    // Test Backward
+    const grads = try Matrix.initRandom(allocator, 2, embedding_dim, 0.0, 1.0);
+    // backward takes ownership of grads
+    var grad_input = try ff.backward(grads, 0.01);
+    defer grad_input.deinit();
+
+    try std.testing.expectEqual(input.rows, grad_input.rows);
+    try std.testing.expectEqual(input.cols, grad_input.cols);
+}
+
+test "FeedForward (save and load)" {
+    const allocator = std.testing.allocator;
+    const embedding_dim = 16;
+    const hidden_dim = 32;
+
+    var ff = try FeedForward.init(allocator, embedding_dim, hidden_dim);
+    defer ff.deinit();
+
+    var buffer = std.ArrayList(u8){};
+    defer buffer.deinit(allocator);
+    const writer = buffer.writer(allocator);
+    try ff.save(writer);
+
+    var stream = std.io.fixedBufferStream(buffer.items);
+    const reader = stream.reader();
+    var loaded_ff = try FeedForward.load(allocator, reader);
+    defer loaded_ff.deinit();
+
+    try std.testing.expectEqual(ff.parameters(), loaded_ff.parameters());
+}

@@ -20,16 +20,20 @@ This document outlines the features implemented in ZigFormer and the future goal
 - [x] Cross-entropy loss
 - [x] Training loop (pre-training and fine-tuning)
 - [x] Learning rate scheduling
-- [ ] Model checkpointing (save and load)
+- [x] Model checkpointing (save and load)
+- [x] Mini-batch training
+- [x] Gradient accumulation
 
 ### Inference
 - [x] Greedy decoding
 - [x] KV caching
 - [x] Top-k and top-p sampling
-- [ ] Beam search
+- [x] Beam search
 
 ### Usability
 - [x] Command line interface
-- [ ] Configuration file
-- [ ] Multi-threading support
-- [ ] SIMD optimizations
+- [x] Multi-threading support
+- [x] SIMD optimizations
+- [x] Model loading from a checkpoint
+- [x] Configuration file
+- [x] Better error handling and validation

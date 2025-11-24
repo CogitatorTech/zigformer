@@ -143,4 +143,78 @@ pub const LayerNorm = struct {
     pub fn toLayer(self: *LayerNorm) layer.Layer {
         return layer.toLayer(LayerNorm)(self);
     }
+
+    pub fn save(self: *const LayerNorm, writer: anytype) !void {
+        try self.gamma.save(writer);
+        try self.beta.save(writer);
+    }
+
+    pub fn load(allocator: std.mem.Allocator, reader: anytype) !*LayerNorm {
+        const self = try allocator.create(LayerNorm);
+        errdefer allocator.destroy(self);
+
+        var gamma = try Matrix.load(allocator, reader);
+        errdefer gamma.deinit();
+
+        var beta = try Matrix.load(allocator, reader);
+        errdefer beta.deinit();
+
+        self.* = .{
+            .allocator = allocator,
+            .gamma = gamma,
+            .beta = beta,
+            .optimizer_gamma = try Adam.init(allocator, gamma.rows, gamma.cols),
+            .optimizer_beta = try Adam.init(allocator, beta.rows, beta.cols),
+            .has_cache = false,
+            .cached_input = undefined,
+            .cached_mean = undefined,
+            .cached_inv_std_dev = undefined,
+        };
+        return self;
+    }
 };
+test "LayerNorm" {
+    const allocator = std.testing.allocator;
+    const feature_dim = 16;
+
+    var ln = try LayerNorm.init(allocator, feature_dim);
+    defer ln.deinit();
+
+    // Test Forward
+    var input = try Matrix.initRandom(allocator, 2, feature_dim, 0.0, 1.0);
+    defer input.deinit();
+
+    var output = try ln.forward(input);
+    defer output.deinit();
+
+    try std.testing.expectEqual(input.rows, output.rows);
+    try std.testing.expectEqual(input.cols, output.cols);
+
+    // Test Backward
+    const grads = try Matrix.initRandom(allocator, 2, feature_dim, 0.0, 1.0);
+    var grad_input = try ln.backward(grads, 0.01);
+    defer grad_input.deinit();
+
+    try std.testing.expectEqual(input.rows, grad_input.rows);
+    try std.testing.expectEqual(input.cols, grad_input.cols);
+}
+
+test "LayerNorm (save and load)" {
+    const allocator = std.testing.allocator;
+    const feature_dim = 16;
+
+    var ln = try LayerNorm.init(allocator, feature_dim);
+    defer ln.deinit();
+
+    var buffer = std.ArrayList(u8){};
+    defer buffer.deinit(allocator);
+    const writer = buffer.writer(allocator);
+    try ln.save(writer);
+
+    var stream = std.io.fixedBufferStream(buffer.items);
+    const reader = stream.reader();
+    var loaded_ln = try LayerNorm.load(allocator, reader);
+    defer loaded_ln.deinit();
+
+    try std.testing.expectEqual(ln.parameters(), loaded_ln.parameters());
+}

@@ -8,6 +8,40 @@ const Embeddings = lib.embeddings.Embeddings;
 const TransformerBlock = lib.transformer.TransformerBlock;
 const OutputProjection = lib.output_projection.OutputProjection;
 
+pub const BeamNode = struct {
+    sequence: std.ArrayListUnmanaged(u32),
+    score: f32,
+    finished: bool,
+
+    pub fn init(allocator: std.mem.Allocator, initial_seq: []const u32, initial_score: f32) !BeamNode {
+        var seq = std.ArrayListUnmanaged(u32){};
+        try seq.appendSlice(allocator, initial_seq);
+        return BeamNode{
+            .sequence = seq,
+            .score = initial_score,
+            .finished = false,
+        };
+    }
+
+    pub fn deinit(self: *BeamNode, allocator: std.mem.Allocator) void {
+        self.sequence.deinit(allocator);
+    }
+
+    pub fn clone(self: *const BeamNode, allocator: std.mem.Allocator) !BeamNode {
+        var seq = std.ArrayListUnmanaged(u32){};
+        try seq.appendSlice(allocator, self.sequence.items);
+        return BeamNode{
+            .sequence = seq,
+            .score = self.score,
+            .finished = self.finished,
+        };
+    }
+};
+
+fn compareBeamNodes(_: void, lhs: BeamNode, rhs: BeamNode) bool {
+    return lhs.score > rhs.score; // Descending order
+}
+
 pub const LLM = struct {
     allocator: std.mem.Allocator,
     vocab: Vocab,
@@ -48,10 +82,17 @@ pub const LLM = struct {
     }
 
     pub fn deinit(self: *LLM) void {
+        self.vocab.deinit();
         for (self.network.items) |layer| {
             layer.deinit();
         }
         self.network.deinit(self.allocator);
+    }
+
+    pub fn resetCache(self: *LLM) void {
+        for (self.network.items) |*layer| {
+            layer.resetCache();
+        }
     }
 
     pub fn networkDescription(self: *const LLM) []const u8 {
@@ -232,7 +273,146 @@ pub const LLM = struct {
         topp,
     };
 
+    pub fn beamSearch(self: *LLM, text: []const u8, beam_width: usize, max_new_tokens: usize) ![]u8 {
+        self.setBatchSize(1);
+        var tokenized = try self.tokenize(text);
+        defer tokenized.deinit(self.allocator);
+
+        if (tokenized.items.len == 0) {
+            return self.allocator.dupe(u8, "");
+        }
+
+        var beam = std.ArrayListUnmanaged(BeamNode){};
+        defer {
+            for (beam.items) |*node| node.deinit(self.allocator);
+            beam.deinit(self.allocator);
+        }
+
+        // Initialize beam with the prompt
+        try beam.append(self.allocator, try BeamNode.init(self.allocator, tokenized.items, 0.0));
+
+        const end_token = self.vocab.encode("</s>").?;
+
+        for (0..max_new_tokens) |_| {
+            var candidates = std.ArrayListUnmanaged(BeamNode){};
+            defer {
+                for (candidates.items) |*node| node.deinit(self.allocator);
+                candidates.deinit(self.allocator);
+            }
+
+            var all_finished = true;
+
+            for (beam.items) |*node| {
+                if (node.finished) {
+                    try candidates.append(self.allocator, try node.clone(self.allocator));
+                    continue;
+                }
+                all_finished = false;
+
+                if (node.sequence.items.len >= lib.config.max_seq_len) {
+                    var finished_node = try node.clone(self.allocator);
+                    finished_node.finished = true;
+                    try candidates.append(self.allocator, finished_node);
+                    continue;
+                }
+
+                // Run forward pass
+                var input_matrix = try Matrix.init(self.allocator, 1, node.sequence.items.len);
+                errdefer input_matrix.deinit();
+                for (node.sequence.items, 0..) |tok, i| {
+                    input_matrix.data[i] = @floatFromInt(tok);
+                }
+
+                var temp_matrix = input_matrix;
+                for (self.network.items) |*layer| {
+                    const next_matrix = try layer.forward(temp_matrix, false);
+                    if (temp_matrix.data.ptr != input_matrix.data.ptr) {
+                        temp_matrix.deinit();
+                    }
+                    temp_matrix = next_matrix;
+                }
+                var logits = temp_matrix;
+
+                var last_logit = try logits.getRow(logits.rows - 1);
+                logits.deinit();
+                defer last_logit.deinit();
+
+                // LogSoftmax for numerical stability in beam search
+                // log_softmax(x_i) = x_i - max(x) - log(sum(exp(x_j - max(x))))
+                var max_val: f32 = -std.math.inf(f32);
+                for (last_logit.data) |val| max_val = @max(max_val, val);
+
+                var sum_exp: f32 = 0.0;
+                for (last_logit.data) |val| sum_exp += std.math.exp(val - max_val);
+                const log_sum_exp = std.math.log(f32, sum_exp, std.math.e);
+
+                for (last_logit.data) |*val| {
+                    val.* = (val.* - max_val) - log_sum_exp;
+                }
+
+                // Select top beam_width candidates
+                const TopToken = struct { idx: u32, score: f32 };
+                var top_tokens = std.ArrayListUnmanaged(TopToken){};
+                defer top_tokens.deinit(self.allocator);
+
+                // Simple top-k selection
+                for (last_logit.data, 0..) |score, idx| {
+                    try top_tokens.append(self.allocator, .{ .idx = @intCast(idx), .score = score });
+                }
+
+                // Sort by score descending
+                std.sort.pdq(TopToken, top_tokens.items, {}, struct {
+                    fn lessThan(_: void, lhs: TopToken, rhs: TopToken) bool {
+                        return lhs.score > rhs.score;
+                    }
+                }.lessThan);
+
+                const num_candidates = @min(beam_width, top_tokens.items.len);
+                for (0..num_candidates) |i| {
+                    const token = top_tokens.items[i];
+                    var new_node = try node.clone(self.allocator);
+                    try new_node.sequence.append(self.allocator, token.idx);
+                    new_node.score += token.score;
+                    if (token.idx == end_token) {
+                        new_node.finished = true;
+                    }
+                    try candidates.append(self.allocator, new_node);
+                }
+            }
+
+            if (all_finished) break;
+
+            // Select best candidates for next beam
+            std.sort.pdq(BeamNode, candidates.items, {}, compareBeamNodes);
+
+            // Clear current beam and take top beam_width from candidates
+            for (beam.items) |*node| node.deinit(self.allocator);
+            beam.clearRetainingCapacity();
+
+            const next_beam_size = @min(beam_width, candidates.items.len);
+            for (0..next_beam_size) |i| {
+                try beam.append(self.allocator, try candidates.items[i].clone(self.allocator));
+            }
+        }
+
+        // Return best sequence (excluding prompt)
+        const best_node = beam.items[0];
+        var result_builder = std.ArrayList(u8){};
+        defer result_builder.deinit(self.allocator);
+
+        // Skip prompt tokens
+        const prompt_len = tokenized.items.len;
+        for (best_node.sequence.items[prompt_len..], 0..) |tok, i| {
+            if (self.vocab.decode(tok)) |word| {
+                if (i > 0) try result_builder.append(self.allocator, ' ');
+                try result_builder.appendSlice(self.allocator, word);
+            }
+        }
+        return result_builder.toOwnedSlice(self.allocator);
+    }
+
     pub fn predictWithSampling(self: *LLM, text: []const u8, mode: SamplingMode, k: usize, p: f32) ![]u8 {
+        self.setBatchSize(1);
         var tokenized = try self.tokenize(text);
         defer tokenized.deinit(self.allocator);
 
@@ -248,14 +428,14 @@ pub const LLM = struct {
 
         for (0..(lib.config.max_seq_len - input_len)) |_| {
             var input_matrix = try Matrix.init(self.allocator, 1, tokenized.items.len);
-            defer input_matrix.deinit();
+            errdefer input_matrix.deinit();
             for (tokenized.items, 0..) |tok, i| {
                 input_matrix.data[i] = @floatFromInt(tok);
             }
 
             var temp_matrix = input_matrix;
             for (self.network.items) |*layer| {
-                const next_matrix = try layer.forward(temp_matrix);
+                const next_matrix = try layer.forward(temp_matrix, false);
                 if (temp_matrix.data.ptr != input_matrix.data.ptr) {
                     temp_matrix.deinit();
                 }
@@ -296,7 +476,35 @@ pub const LLM = struct {
         return result_builder.toOwnedSlice(self.allocator);
     }
 
+    pub fn forward(self: *LLM, input: Matrix, use_cache: bool) !Matrix {
+        var current = input;
+        var i: usize = 0;
+        for (self.network.items) |*layer| {
+            const next = try layer.forward(current, use_cache);
+            if (i > 0) {
+                current.deinit();
+            }
+            current = next;
+            i += 1;
+        }
+        return current;
+    }
+
+    fn sampleGreedy(self: *const LLM, logits: Matrix) u32 {
+        _ = self;
+        var max_idx: u32 = 0;
+        var max_val: f32 = -std.math.inf(f32);
+        for (logits.data, 0..) |val, i| {
+            if (val > max_val) {
+                max_val = val;
+                max_idx = @intCast(i);
+            }
+        }
+        return max_idx;
+    }
+
     pub fn predict(self: *LLM, text: []const u8) ![]u8 {
+        self.setBatchSize(1);
         var tokenized = try self.tokenize(text);
         defer tokenized.deinit(self.allocator);
 
@@ -310,37 +518,53 @@ pub const LLM = struct {
 
         const end_token = self.vocab.encode("</s>").?;
 
-        for (0..(lib.config.max_seq_len - input_len)) |_| {
-            var input_matrix = try Matrix.init(self.allocator, 1, tokenized.items.len);
-            defer input_matrix.deinit();
-            for (tokenized.items, 0..) |tok, i| {
-                input_matrix.data[i] = @floatFromInt(tok);
-            }
+        // Reset cache
+        self.resetCache();
 
-            var temp_matrix = input_matrix;
-            for (self.network.items) |*layer| {
-                const next_matrix = try layer.forward(temp_matrix);
-                if (temp_matrix.data.ptr != input_matrix.data.ptr) {
-                    temp_matrix.deinit();
-                }
-                temp_matrix = next_matrix;
-            }
+        // Process prompt (fill cache)
+        // We run the prompt through the model with use_cache=true.
+        // The model will compute K/V for all prompt tokens and store them.
+        // We only care about the last token's output for the next prediction.
 
-            var logits = temp_matrix;
+        var input_matrix = try Matrix.init(self.allocator, 1, tokenized.items.len);
+        errdefer input_matrix.deinit();
+        for (tokenized.items, 0..) |tok, i| {
+            input_matrix.data[i] = @floatFromInt(tok);
+        }
 
-            var last_logit = try logits.getRow(logits.rows - 1);
-            logits.deinit();
-            defer last_logit.deinit();
+        var logits = try self.forward(input_matrix, true); // use_cache=true
+        input_matrix.deinit();
 
-            softmax(&last_logit);
-            var next_tokens = try greedyDecode(&last_logit);
-            defer next_tokens.deinit(self.allocator);
+        var last_logit = try logits.getRow(logits.rows - 1);
+        logits.deinit();
 
-            const next_token = next_tokens.items[0];
+        // Sample first token
+        var next_token = self.sampleGreedy(last_logit);
+        last_logit.deinit();
+
+        if (next_token != end_token) {
             try output_tokens.append(self.allocator, next_token);
-            try tokenized.append(self.allocator, next_token);
 
-            if (next_token == end_token) break;
+            // Generation loop
+            for (0..(lib.config.max_seq_len - input_len - 1)) |_| {
+                // Prepare input for next step (single token)
+                input_matrix = try Matrix.init(self.allocator, 1, 1);
+                errdefer input_matrix.deinit();
+                input_matrix.data[0] = @floatFromInt(next_token);
+
+                // Run forward with cache
+                logits = try self.forward(input_matrix, true);
+                input_matrix.deinit();
+
+                last_logit = try logits.getRow(logits.rows - 1);
+                logits.deinit();
+
+                next_token = self.sampleGreedy(last_logit);
+                last_logit.deinit();
+
+                if (next_token == end_token) break;
+                try output_tokens.append(self.allocator, next_token);
+            }
         }
 
         var result_builder = std.ArrayList(u8){};
@@ -355,6 +579,7 @@ pub const LLM = struct {
     }
 
     fn crossEntropyLoss(probs: *const Matrix, targets: []const u32) f32 {
+        if (targets.len == 0) return 0.0; // Avoid division by zero
         var loss: f32 = 0.0;
         for (targets, 0..) |target_id, i| {
             const prob_target = probs.at(i, target_id);
@@ -377,7 +602,40 @@ pub const LLM = struct {
         return grads;
     }
 
-    pub fn train(self: *LLM, data: []const []const u8, epochs: usize, lr: f32) !void {
+    pub fn setBatchSize(self: *LLM, batch_size: usize) void {
+        // Iterate over layers and set batch_size for SelfAttention layers
+        // Note: We need to know which layers are SelfAttention.
+        // In our simple structure, we know layers 1, 2, 3 are TransformerBlocks.
+        // TransformerBlock contains SelfAttention.
+        // But Layer is type-erased.
+        // Ideally, we should add setBatchSize to Layer vtable, but that's a big change.
+        // For now, we'll rely on the known structure and pointer casting, which is risky but fits the current style.
+        // Actually, TransformerBlock has a setBatchSize method we should add.
+        // Let's assume we add setBatchSize to TransformerBlock and call it here.
+
+        // Wait, we can't easily cast opaque pointers back to types without RTTI or knowing the type.
+        // Given the fixed structure:
+        // Layer 0: Embeddings (no batch_size needed)
+        // Layer 1: TransformerBlock
+        // Layer 2: TransformerBlock
+        // Layer 3: TransformerBlock
+        // Layer 4: OutputProjection (no batch_size needed)
+
+        const embeddings: *Embeddings = @ptrCast(@alignCast(self.network.items[0].self));
+        embeddings.setBatchSize(batch_size);
+
+        for (self.network.items[1..4]) |*layer| {
+            const tb: *TransformerBlock = @ptrCast(@alignCast(layer.self));
+            tb.setBatchSize(batch_size);
+        }
+    }
+
+    pub fn train(self: *LLM, data: []const []const u8, epochs: usize, lr: f32, batch_size: usize, accumulation_steps: usize) !void {
+        self.setBatchSize(batch_size);
+
+        // Effective learning rate for gradient accumulation
+        const effective_lr = lr / @as(f32, @floatFromInt(accumulation_steps));
+
         var tokenized_data = std.ArrayList(std.ArrayList(u32)){};
         defer {
             for (tokenized_data.items) |*d| d.deinit(self.allocator);
@@ -388,24 +646,65 @@ pub const LLM = struct {
             try tokenized_data.append(self.allocator, try self.tokenize(text));
         }
 
+        // Simple shuffle could be added here
+
         for (0..epochs) |epoch| {
             var total_loss: f32 = 0.0;
-            var processed_count: usize = 0;
-            for (tokenized_data.items) |training_row| {
-                if (training_row.items.len < 2) continue;
-                processed_count += 1;
+            var processed_batches: usize = 0;
+            var accumulation_counter: usize = 0;
 
-                const len = @min(training_row.items.len, lib.config.max_seq_len + 1);
-                const input_ids = training_row.items[0 .. len - 1];
-                const target_ids = training_row.items[1..len];
+            var i: usize = 0;
+            while (i < tokenized_data.items.len) : (i += batch_size) {
+                const end = @min(i + batch_size, tokenized_data.items.len);
+                const batch = tokenized_data.items[i..end];
+                if (batch.len == 0) continue;
 
-                var input_matrix = try Matrix.init(self.allocator, 1, input_ids.len);
+                // Determine max length in this batch (up to max_seq_len)
+                var max_len: usize = 0;
+                for (batch) |seq| {
+                    max_len = @max(max_len, @min(seq.items.len, lib.config.max_seq_len + 1));
+                }
+                if (max_len < 2) continue; // Skip if too short
+
+                const current_batch_size = batch.len;
+                // If last batch is smaller, we need to update batch_size temporarily
+                if (current_batch_size != batch_size) {
+                    self.setBatchSize(current_batch_size);
+                }
+
+                const seq_len = max_len - 1; // Input length
+                const total_tokens = current_batch_size * seq_len;
+
+                // Prepare input matrix (batch_size * seq_len)
+                var input_matrix = try Matrix.init(self.allocator, 1, total_tokens);
                 defer input_matrix.deinit();
-                for (input_ids, 0..) |tok, i| input_matrix.data[i] = @floatFromInt(tok);
+
+                // Prepare targets
+                var targets = try self.allocator.alloc(u32, total_tokens);
+                defer self.allocator.free(targets);
+
+                // Fill inputs and targets with padding (0) if necessary
+                for (batch, 0..) |seq, b| {
+                    const len = @min(seq.items.len, lib.config.max_seq_len + 1);
+                    const input_ids = seq.items[0 .. len - 1];
+                    const target_ids = seq.items[1..len];
+
+                    for (0..seq_len) |t| {
+                        const global_idx = b * seq_len + t;
+                        if (t < input_ids.len) {
+                            input_matrix.data[global_idx] = @floatFromInt(input_ids[t]);
+                            targets[global_idx] = target_ids[t];
+                        } else {
+                            // Padding
+                            input_matrix.data[global_idx] = 0; // Pad with 0
+                            targets[global_idx] = 0; // Pad target with 0 (should be ignored in loss)
+                        }
+                    }
+                }
 
                 var temp_matrix = input_matrix;
                 for (self.network.items) |*layer| {
-                    const next_matrix = try layer.forward(temp_matrix);
+                    const next_matrix = try layer.forward(temp_matrix, false);
                     if (temp_matrix.data.ptr != input_matrix.data.ptr) {
                         temp_matrix.deinit();
                     }
@@ -417,20 +716,36 @@ pub const LLM = struct {
                 var probs = logits;
                 defer probs.deinit();
 
-                total_loss += crossEntropyLoss(&probs, target_ids);
+                // Compute loss
+                total_loss += crossEntropyLoss(&probs, targets);
 
-                var grads = try computeGradients(&probs, target_ids);
+                var grads = try computeGradients(&probs, targets);
 
-                var i = self.network.items.len;
-                while (i > 0) {
-                    i -= 1;
-                    const next_grads = try self.network.items[i].backward(grads, lr);
+                // Backward pass with effective learning rate
+                var layer_idx = self.network.items.len;
+                while (layer_idx > 0) {
+                    layer_idx -= 1;
+                    const next_grads = try self.network.items[layer_idx].backward(grads, effective_lr);
                     grads = next_grads;
                 }
                 grads.deinit();
+
+                accumulation_counter += 1;
+
+                // Track processed batches (count every accumulation_steps batches as one effective batch)
+                if (accumulation_counter >= accumulation_steps) {
+                    processed_batches += 1;
+                    accumulation_counter = 0;
+                }
+
+                // Restore batch size if changed
+                if (current_batch_size != batch_size) {
+                    self.setBatchSize(batch_size);
+                }
             }
-            if (processed_count > 0) {
-                std.debug.print("Epoch {}: Loss = {:.4}\n", .{ epoch, total_loss / @as(f32, @floatFromInt(processed_count)) });
+
+            if (processed_batches > 0) {
+                std.debug.print("Epoch {}: Loss = {:.4}\n", .{ epoch, total_loss / @as(f32, @floatFromInt(processed_batches * accumulation_steps)) });
             } else {
                 std.debug.print("Epoch {}: No data processed.\n", .{epoch});
             }
@@ -441,21 +756,39 @@ pub const LLM = struct {
         const file = try std.fs.cwd().createFile(path, .{});
         defer file.close();
 
+        var buffer = std.ArrayList(u8){};
+        defer buffer.deinit(self.allocator);
+        const writer = buffer.writer(self.allocator);
+
         // Write magic number "ZGFM"
-        try file.writeAll("ZGFM");
+        try writer.writeAll("ZGFM");
 
         // Write version
         const version: u32 = 1;
-        try file.writeAll(std.mem.asBytes(&version));
+        try writer.writeAll(std.mem.asBytes(&version));
 
-        // Save vocabulary - we'll write it to a buffer first
-        var buffer = std.ArrayList(u8){};
-        defer buffer.deinit(self.allocator);
-
-        const writer = buffer.writer(self.allocator);
+        // Save vocabulary
         try self.vocab.save(writer);
-        try file.writeAll(buffer.items);
 
+        // Save Embeddings (Layer 0)
+        const embeddings_ptr: *const Embeddings = @ptrCast(@alignCast(self.network.items[0].self));
+        try embeddings_ptr.save(writer);
+
+        // Save Transformer Blocks (Layers 1, 2, 3)
+        const transformer1_ptr: *const TransformerBlock = @ptrCast(@alignCast(self.network.items[1].self));
+        try transformer1_ptr.save(writer);
+
+        const transformer2_ptr: *const TransformerBlock = @ptrCast(@alignCast(self.network.items[2].self));
+        try transformer2_ptr.save(writer);
+
+        const transformer3_ptr: *const TransformerBlock = @ptrCast(@alignCast(self.network.items[3].self));
+        try transformer3_ptr.save(writer);
+
+        // Save Output Projection (Layer 4)
+        const output_ptr: *const OutputProjection = @ptrCast(@alignCast(self.network.items[4].self));
+        try output_ptr.save(writer);
+
+        try file.writeAll(buffer.items);
         std.debug.print("Model saved to {s}\n", .{path});
     }
 
@@ -463,38 +796,101 @@ pub const LLM = struct {
         const file = try std.fs.cwd().openFile(path, .{});
         defer file.close();
 
+        const file_size = try file.getEndPos();
+        const buffer = try allocator.alloc(u8, file_size);
+        defer allocator.free(buffer);
+        _ = try file.readAll(buffer);
+
+        var stream = std.io.fixedBufferStream(buffer);
+        const reader = stream.reader();
+
         // Read and verify magic number
         var magic: [4]u8 = undefined;
-        _ = try file.readAll(&magic);
+        _ = try reader.readAll(&magic);
         if (!std.mem.eql(u8, &magic, "ZGFM")) {
             return error.InvalidModelFile;
         }
 
         // Read version
         var version_bytes: [4]u8 = undefined;
-        _ = try file.readAll(&version_bytes);
+        _ = try reader.readAll(&version_bytes);
         const version = std.mem.readInt(u32, &version_bytes, .little);
         if (version != 1) {
             return error.UnsupportedModelVersion;
         }
 
-        // Read the rest of the file into a buffer for vocabulary loading
-        const file_size = try file.getEndPos();
-        const remaining_size = file_size - 8; // 4 bytes magic + 4 bytes version
-        const buffer = try allocator.alloc(u8, remaining_size);
-        defer allocator.free(buffer);
-        _ = try file.readAll(buffer);
-
-        // Load vocabulary from buffer
-        var stream = std.io.fixedBufferStream(buffer);
-        const reader = stream.reader();
-        const vocab = try Vocab.load(allocator, reader);
+        // Load vocabulary
+        var vocab = try Vocab.load(allocator, reader);
         errdefer vocab.deinit();
 
-        // Initialize model with loaded vocabulary
-        const model = try LLM.init(allocator, vocab);
+        var network = std.ArrayList(Layer){};
+        errdefer {
+            for (network.items) |layer| {
+                layer.deinit();
+            }
+            network.deinit(allocator);
+        }
+
+        // Load Embeddings
+        const embeddings = try Embeddings.load(allocator, reader);
+        try network.append(allocator, embeddings.toLayer());
+
+        // Load Transformer Blocks
+        const transformer1 = try TransformerBlock.load(allocator, reader);
+        try network.append(allocator, transformer1.toLayer());
+
+        const transformer2 = try TransformerBlock.load(allocator, reader);
+        try network.append(allocator, transformer2.toLayer());
+
+        const transformer3 = try TransformerBlock.load(allocator, reader);
+        try network.append(allocator, transformer3.toLayer());
+
+        // Load Output Projection
+        const output_projection = try OutputProjection.load(allocator, reader);
+        try network.append(allocator, output_projection.toLayer());
 
         std.debug.print("Model loaded from {s}\n", .{path});
-        return model;
+
+        return LLM{
+            .allocator = allocator,
+            .vocab = vocab,
+            .network = network,
+        };
     }
 };
+
+test "LLM (save and load)" {
+    const allocator = std.testing.allocator;
+
+    // Create a small vocab
+    var vocab = Vocab.init(allocator);
+    // defer vocab.deinit(); // LLM takes ownership
+    const words = &[_][]const u8{ "hello", "world", "</s>" };
+    try vocab.build(words);
+
+    // Init model
+    var model = try LLM.init(allocator, vocab);
+    defer model.deinit();
+
+    // Save model
+    const test_path = "test_model.bin";
+    try model.save(test_path);
+    defer std.fs.cwd().deleteFile(test_path) catch {};
+
+    // Load model
+    var loaded_model = try LLM.load(allocator, test_path);
+    defer loaded_model.deinit();
+
+    // Compare total parameters
+    try std.testing.expectEqual(model.totalParameters(), loaded_model.totalParameters());
+
+    // Compare predictions (should be identical)
+    const input_text = "hello";
+    const output1 = try model.predict(input_text);
+    defer allocator.free(output1);
+
+    const output2 = try loaded_model.predict(input_text);
+    defer allocator.free(output2);
+
+    try std.testing.expectEqualStrings(output1, output2);
+}

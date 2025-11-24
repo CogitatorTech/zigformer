@@ -13,13 +13,13 @@
 [![Zig Version](https://img.shields.io/badge/Zig-0.15.2-orange?logo=zig&labelColor=282c34)](https://ziglang.org/download/)
 [![Release](https://img.shields.io/github/release/CogitatorTech/zigformer.svg?label=release&style=flat&labelColor=282c34&logo=github)](https://github.com/CogitatorTech/zigformer/releases/latest)
 
-An educational transformer-based LLM implementation in pure Zig
+An educational transformer-based LLM in pure Zig
 
 </div>
 
 ---
 
-ZigFormer is a fully functional implementation of a Transformer-based large language model (LLM) written in Zig
+ZigFormer is a fully functional implementation of a transformer-based large language model (LLM) written in Zig
 programming language.
 
 ### Features

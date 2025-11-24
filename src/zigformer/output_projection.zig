@@ -86,4 +86,78 @@ pub const OutputProjection = struct {
     pub fn toLayer(self: *OutputProjection) layer.Layer {
         return layer.toLayer(OutputProjection)(self);
     }
+
+    pub fn save(self: *const OutputProjection, writer: anytype) !void {
+        try self.w_out.save(writer);
+        try self.b_out.save(writer);
+    }
+
+    pub fn load(allocator: std.mem.Allocator, reader: anytype) !*OutputProjection {
+        const self = try allocator.create(OutputProjection);
+        errdefer allocator.destroy(self);
+
+        var w_out = try Matrix.load(allocator, reader);
+        errdefer w_out.deinit();
+
+        var b_out = try Matrix.load(allocator, reader);
+        errdefer b_out.deinit();
+
+        self.* = .{
+            .allocator = allocator,
+            .w_out = w_out,
+            .b_out = b_out,
+            .optimizer_w = try Adam.init(allocator, w_out.rows, w_out.cols),
+            .optimizer_b = try Adam.init(allocator, b_out.rows, b_out.cols),
+            .has_cached_input = false,
+            .cached_input = undefined,
+        };
+        return self;
+    }
 };
+test "OutputProjection" {
+    const allocator = std.testing.allocator;
+    const embedding_dim = 16;
+    const vocab_size = 10;
+
+    var op = try OutputProjection.init(allocator, embedding_dim, vocab_size);
+    defer op.deinit();
+
+    // Test Forward
+    var input = try Matrix.initRandom(allocator, 2, embedding_dim, 0.0, 1.0);
+    defer input.deinit();
+
+    var output = try op.forward(input);
+    defer output.deinit();
+
+    try std.testing.expectEqual(input.rows, output.rows);
+    try std.testing.expectEqual(vocab_size, output.cols);
+
+    // Test Backward
+    const grads = try Matrix.initRandom(allocator, 2, vocab_size, 0.0, 1.0);
+    var grad_input = try op.backward(grads, 0.01);
+    defer grad_input.deinit();
+
+    try std.testing.expectEqual(input.rows, grad_input.rows);
+    try std.testing.expectEqual(input.cols, grad_input.cols);
+}
+
+test "OutputProjection (save and load)" {
+    const allocator = std.testing.allocator;
+    const embedding_dim = 16;
+    const vocab_size = 10;
+
+    var op = try OutputProjection.init(allocator, embedding_dim, vocab_size);
+    defer op.deinit();
+
+    var buffer = std.ArrayList(u8){};
+    defer buffer.deinit(allocator);
+    const writer = buffer.writer(allocator);
+    try op.save(writer);
+
+    var stream = std.io.fixedBufferStream(buffer.items);
+    const reader = stream.reader();
+    var loaded_op = try OutputProjection.load(allocator, reader);
+    defer loaded_op.deinit();
+
+    try std.testing.expectEqual(op.parameters(), loaded_op.parameters());
+}

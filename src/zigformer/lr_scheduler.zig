@@ -36,7 +36,7 @@ pub const LRScheduler = struct {
     }
 
     fn linearDecay(self: *const LRScheduler) f32 {
-        if (self.current_step >= self.total_steps) {
+        if (self.total_steps == 0 or self.current_step >= self.total_steps) {
             return self.min_lr;
         }
         const progress: f32 = @as(f32, @floatFromInt(self.current_step)) / @as(f32, @floatFromInt(self.total_steps));
@@ -44,7 +44,7 @@ pub const LRScheduler = struct {
     }
 
     fn cosineAnnealing(self: *const LRScheduler) f32 {
-        if (self.current_step >= self.total_steps) {
+        if (self.total_steps == 0 or self.current_step >= self.total_steps) {
             return self.min_lr;
         }
         const progress: f32 = @as(f32, @floatFromInt(self.current_step)) / @as(f32, @floatFromInt(self.total_steps));

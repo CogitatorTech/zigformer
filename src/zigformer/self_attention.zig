@@ -15,6 +15,7 @@ pub const SelfAttention = struct {
     w_k: Matrix,
     w_v: Matrix,
     w_o: Matrix, // Output projection
+    batch_size: usize,
 
     has_cache: bool,
     cached_input: Matrix,
@@ -24,22 +25,26 @@ pub const SelfAttention = struct {
     cached_attention_scores: Matrix, // Stores scores for all heads
     cached_context: Matrix, // Stores concatenated context before output projection
 
+    // KV Cache
+    k_cache: Matrix,
+    v_cache: Matrix,
+    cache_len: usize,
+    max_seq_len: usize,
+
     optimizer_w_q: Adam,
     optimizer_w_k: Adam,
     optimizer_w_v: Adam,
     optimizer_w_o: Adam,
 
-    pub fn init(allocator: std.mem.Allocator, embedding_dim: usize) !*SelfAttention {
-        const num_heads = lib.config.num_heads;
+    pub fn init(allocator: std.mem.Allocator, embedding_dim: usize, num_heads: usize, batch_size: usize, max_seq_len: usize) !SelfAttention {
         if (embedding_dim % num_heads != 0) {
-            return error.EmbeddingDimNotDivisibleByNumHeads;
+            return error.EmbeddingDimNotDivisibleByHeads;
         }
         const head_dim = embedding_dim / num_heads;
 
-        const self = try allocator.create(SelfAttention);
         const std_dev = std.math.sqrt(2.0 / @as(f32, @floatFromInt(embedding_dim)));
 
-        self.* = .{
+        return .{
             .allocator = allocator,
             .embedding_dim = embedding_dim,
             .num_heads = num_heads,
@@ -48,19 +53,23 @@ pub const SelfAttention = struct {
             .w_k = try Matrix.initRandom(allocator, embedding_dim, embedding_dim, 0.0, std_dev),
             .w_v = try Matrix.initRandom(allocator, embedding_dim, embedding_dim, 0.0, std_dev),
             .w_o = try Matrix.initRandom(allocator, embedding_dim, embedding_dim, 0.0, std_dev),
+            .batch_size = batch_size,
             .has_cache = false,
-            .cached_input = undefined,
-            .cached_q = undefined,
-            .cached_k = undefined,
-            .cached_v = undefined,
-            .cached_attention_scores = undefined,
-            .cached_context = undefined,
+            .cached_input = try Matrix.init(allocator, 0, 0),
+            .cached_q = try Matrix.init(allocator, 0, 0),
+            .cached_k = try Matrix.init(allocator, 0, 0),
+            .cached_v = try Matrix.init(allocator, 0, 0),
+            .cached_attention_scores = try Matrix.init(allocator, 0, 0),
+            .cached_context = try Matrix.init(allocator, 0, 0),
+            .k_cache = try Matrix.initZeros(allocator, batch_size * max_seq_len, embedding_dim),
+            .v_cache = try Matrix.initZeros(allocator, batch_size * max_seq_len, embedding_dim),
+            .cache_len = 0,
+            .max_seq_len = max_seq_len,
             .optimizer_w_q = try Adam.init(allocator, embedding_dim, embedding_dim),
             .optimizer_w_k = try Adam.init(allocator, embedding_dim, embedding_dim),
             .optimizer_w_v = try Adam.init(allocator, embedding_dim, embedding_dim),
             .optimizer_w_o = try Adam.init(allocator, embedding_dim, embedding_dim),
         };
-        return self;
     }
 
     pub fn deinit(self: *SelfAttention) void {
@@ -68,6 +77,21 @@ pub const SelfAttention = struct {
         self.w_k.deinit();
         self.w_v.deinit();
         self.w_o.deinit();
+        self.cached_input.deinit();
+        self.cached_q.deinit();
+        self.cached_k.deinit();
+        self.cached_v.deinit();
+        self.cached_attention_scores.deinit();
+        self.cached_context.deinit();
+        self.k_cache.deinit();
+        self.v_cache.deinit();
+        self.optimizer_w_q.deinit();
+        self.optimizer_w_k.deinit();
+        self.optimizer_w_v.deinit();
+        self.optimizer_w_o.deinit();
+    }
+
+    pub fn resetCache(self: *SelfAttention) void {
         if (self.has_cache) {
             self.cached_input.deinit();
             self.cached_q.deinit();
@@ -75,15 +99,12 @@ pub const SelfAttention = struct {
             self.cached_v.deinit();
             self.cached_attention_scores.deinit();
             self.cached_context.deinit();
+            self.has_cache = false;
         }
-        self.optimizer_w_q.deinit();
-        self.optimizer_w_k.deinit();
-        self.optimizer_w_v.deinit();
-        self.optimizer_w_o.deinit();
-        self.allocator.destroy(self);
+        self.cache_len = 0;
     }
 
-    pub fn forward(self: *SelfAttention, input: Matrix) !Matrix {
+    pub fn forward(self: *SelfAttention, input: Matrix, use_cache: bool) !Matrix {
         if (self.has_cache) {
             self.cached_input.deinit();
             self.cached_q.deinit();
@@ -97,86 +118,171 @@ pub const SelfAttention = struct {
 
         // Linear projections
         self.cached_q = try self.cached_input.dot(&self.w_q);
-        self.cached_k = try self.cached_input.dot(&self.w_k);
-        self.cached_v = try self.cached_input.dot(&self.w_v);
+        var k_new = try self.cached_input.dot(&self.w_k);
+        defer k_new.deinit();
+        var v_new = try self.cached_input.dot(&self.w_v);
+        defer v_new.deinit();
 
-        const seq_len = input.rows;
+        // Update Cache if enabled
+        if (use_cache) {
+            // Input must be 1 token per batch (rows == batch_size)
+            if (input.rows % self.batch_size != 0) {
+                return error.InputRowsNotDivisibleByBatchSize;
+            }
+
+            const seq_len_in = input.rows / self.batch_size;
+
+            for (0..self.batch_size) |b| {
+                const cache_start = b * self.max_seq_len + self.cache_len;
+                const input_start = b * seq_len_in;
+
+                // Copy new K/V to cache
+                for (0..seq_len_in) |i| {
+                    @memcpy(self.k_cache.data[(cache_start + i) * self.embedding_dim .. (cache_start + i + 1) * self.embedding_dim], k_new.data[(input_start + i) * self.embedding_dim .. (input_start + i + 1) * self.embedding_dim]);
+                    @memcpy(self.v_cache.data[(cache_start + i) * self.embedding_dim .. (cache_start + i + 1) * self.embedding_dim], v_new.data[(input_start + i) * self.embedding_dim .. (input_start + i + 1) * self.embedding_dim]);
+                }
+            }
+            self.cache_len += seq_len_in;
+
+            // Create matrices for the cached K/V (copy the active portion of the cache)
+            const cache_rows = self.batch_size * self.cache_len;
+            self.cached_k = try Matrix.init(self.allocator, cache_rows, self.embedding_dim);
+            self.cached_v = try Matrix.init(self.allocator, cache_rows, self.embedding_dim);
+            @memcpy(self.cached_k.data, self.k_cache.data[0 .. cache_rows * self.embedding_dim]);
+            @memcpy(self.cached_v.data, self.v_cache.data[0 .. cache_rows * self.embedding_dim]);
+        } else {
+            // Training mode: transfer ownership of k_new and v_new to cached_k and cached_v
+            self.cached_k = k_new;
+            self.cached_v = v_new;
+            // Prevent defer from freeing these since we've transferred ownership
+            k_new = try Matrix.init(self.allocator, 0, 0);
+            v_new = try Matrix.init(self.allocator, 0, 0);
+        }
+
+        const total_rows = input.rows;
+        const seq_len = total_rows / self.batch_size;
         const dk_sqrt = std.math.sqrt(@as(f32, @floatFromInt(self.head_dim)));
 
-        // Initialize attention scores storage
-        // We store scores as (num_heads * seq_len, seq_len) for simpler matrix ops if possible,
-        // or just handle logic manually.
-        // Let's do manual loop for clarity and correctness with MHA.
-        self.cached_attention_scores = try Matrix.init(self.allocator, self.num_heads * seq_len, seq_len);
-        self.cached_context = try Matrix.init(self.allocator, seq_len, self.embedding_dim);
+        // Output rows = input rows
+        self.cached_attention_scores = try Matrix.init(self.allocator, self.num_heads * total_rows, if (use_cache) self.cache_len else seq_len);
+        self.cached_context = try Matrix.init(self.allocator, total_rows, self.embedding_dim);
 
-        for (0..self.num_heads) |h| {
-            // Extract Q, K, V for this head
-            // Q_h: (seq_len, head_dim)
-            var q_h = try Matrix.init(self.allocator, seq_len, self.head_dim);
-            defer q_h.deinit();
-            var k_h = try Matrix.init(self.allocator, seq_len, self.head_dim);
-            defer k_h.deinit();
-            var v_h = try Matrix.init(self.allocator, seq_len, self.head_dim);
-            defer v_h.deinit();
+        for (0..self.batch_size) |b| {
+            const batch_offset = b * seq_len;
+            const cache_offset = b * self.max_seq_len;
+            const current_cache_len = if (use_cache) self.cache_len else seq_len;
 
-            for (0..seq_len) |r| {
-                const start = h * self.head_dim;
-                const end = start + self.head_dim;
-                @memcpy(q_h.data[r * self.head_dim .. (r + 1) * self.head_dim], self.cached_q.data[r * self.embedding_dim + start .. r * self.embedding_dim + end]);
-                @memcpy(k_h.data[r * self.head_dim .. (r + 1) * self.head_dim], self.cached_k.data[r * self.embedding_dim + start .. r * self.embedding_dim + end]);
-                @memcpy(v_h.data[r * self.head_dim .. (r + 1) * self.head_dim], self.cached_v.data[r * self.embedding_dim + start .. r * self.embedding_dim + end]);
-            }
+            for (0..self.num_heads) |h| {
+                // Extract Q for this head and batch
+                var q_h = try Matrix.init(self.allocator, seq_len, self.head_dim);
+                defer q_h.deinit();
 
-            // Attention scores = softmax(Q K^T / sqrt(dk))
-            var k_h_t = try k_h.transpose();
-            defer k_h_t.deinit();
-            var scores = try q_h.dot(&k_h_t);
-            // Don't defer scores yet, we need to copy it to cached_attention_scores
-
-            // Scale
-            for (scores.data) |*s| s.* /= dk_sqrt;
-
-            // Masking (causal)
-            for (0..seq_len) |i| {
-                for (i + 1..seq_len) |j| {
-                    scores.set(i, j, -std.math.inf(f32));
+                for (0..seq_len) |r| {
+                    const global_r = batch_offset + r;
+                    const start = h * self.head_dim;
+                    const end = start + self.head_dim;
+                    @memcpy(q_h.data[r * self.head_dim .. (r + 1) * self.head_dim], self.cached_q.data[global_r * self.embedding_dim + start .. global_r * self.embedding_dim + end]);
                 }
-            }
 
-            // Softmax
-            for (0..seq_len) |r| {
-                var max_val: f32 = -std.math.inf(f32);
-                const row_slice = scores.data[r * scores.cols .. (r + 1) * scores.cols];
-                for (row_slice) |s| max_val = @max(max_val, s);
+                // Extract K, V for this head and batch (from cache or current)
+                var k_h = try Matrix.init(self.allocator, current_cache_len, self.head_dim);
+                defer k_h.deinit();
+                var v_h = try Matrix.init(self.allocator, current_cache_len, self.head_dim);
+                defer v_h.deinit();
 
-                var sum_exp: f32 = 0.0;
-                for (row_slice) |*s| {
-                    s.* = std.math.exp(s.* - max_val);
-                    sum_exp += s.*;
+                if (use_cache) {
+                    for (0..current_cache_len) |r| {
+                        const global_r = cache_offset + r;
+                        const start = h * self.head_dim;
+                        const end = start + self.head_dim;
+                        @memcpy(k_h.data[r * self.head_dim .. (r + 1) * self.head_dim], self.k_cache.data[global_r * self.embedding_dim + start .. global_r * self.embedding_dim + end]);
+                        @memcpy(v_h.data[r * self.head_dim .. (r + 1) * self.head_dim], self.v_cache.data[global_r * self.embedding_dim + start .. global_r * self.embedding_dim + end]);
+                    }
+                } else {
+                    for (0..seq_len) |r| {
+                        const global_r = batch_offset + r;
+                        const start = h * self.head_dim;
+                        const end = start + self.head_dim;
+                        @memcpy(k_h.data[r * self.head_dim .. (r + 1) * self.head_dim], self.cached_k.data[global_r * self.embedding_dim + start .. global_r * self.embedding_dim + end]);
+                        @memcpy(v_h.data[r * self.head_dim .. (r + 1) * self.head_dim], self.cached_v.data[global_r * self.embedding_dim + start .. global_r * self.embedding_dim + end]);
+                    }
                 }
-                if (sum_exp > 0) {
-                    for (row_slice) |*s| s.* /= sum_exp;
+
+                // Attention scores = softmax(Q K^T / sqrt(dk))
+                var k_h_t = try k_h.transpose();
+                defer k_h_t.deinit();
+                var scores = try q_h.dot(&k_h_t);
+                // Don't defer scores yet, we need to copy it to cached_attention_scores
+
+                // Scale
+                for (scores.data) |*s| s.* /= dk_sqrt;
+
+                // Masking (causal)
+                // If use_cache, we are attending to [0..cache_len].
+                // The current query is at position `cache_len - 1` (if single token).
+                // Or `cache_len - seq_len + i`.
+                // If use_cache is true, we assume we are generating, so we attend to everything in the past.
+                // So NO masking needed for the past tokens.
+                // But if we are processing a prompt (seq_len > 1) with use_cache=true (filling cache),
+                // we DO need masking for the prompt tokens against themselves.
+
+                // Masking (causal)
+                // If use_cache, we are attending to [0..cache_len].
+                // The current query is at position `cache_len - seq_len + i` (where i is 0..seq_len).
+                // We need to mask keys that are in the future relative to the query.
+                // Keys are at indices 0..cache_len.
+                // Mask key j if j > query_pos.
+
+                const current_cache_len_val = if (use_cache) self.cache_len else seq_len;
+                const old_cache_len = if (use_cache) self.cache_len - seq_len else 0;
+
+                for (0..seq_len) |i| {
+                    const query_pos = old_cache_len + i;
+                    // Mask keys j where j > query_pos
+                    const start_mask = query_pos + 1;
+                    if (start_mask < current_cache_len_val) {
+                        for (start_mask..current_cache_len_val) |j| {
+                            scores.set(i, j, -std.math.inf(f32));
+                        }
+                    }
                 }
-            }
 
-            // Store scores
-            for (0..seq_len) |r| {
-                const src_row = scores.data[r * seq_len .. (r + 1) * seq_len];
-                const dst_row = self.cached_attention_scores.data[(h * seq_len + r) * seq_len .. (h * seq_len + r + 1) * seq_len];
-                @memcpy(dst_row, src_row);
-            }
+                // Softmax
+                for (0..seq_len) |r| {
+                    var max_val: f32 = -std.math.inf(f32);
+                    const row_slice = scores.data[r * scores.cols .. (r + 1) * scores.cols];
+                    for (row_slice) |s| max_val = @max(max_val, s);
 
-            // Compute context for this head: scores * V
-            var context_h = try scores.dot(&v_h);
-            defer context_h.deinit();
-            scores.deinit(); // Now we can free scores
+                    var sum_exp: f32 = 0.0;
+                    for (row_slice) |*s| {
+                        s.* = std.math.exp(s.* - max_val);
+                        sum_exp += s.*;
+                    }
+                    if (sum_exp > 0) {
+                        for (row_slice) |*s| s.* /= sum_exp;
+                    }
+                }
 
-            // Concatenate into cached_context
-            for (0..seq_len) |r| {
-                const src_row = context_h.data[r * self.head_dim .. (r + 1) * self.head_dim];
-                const dst_start = r * self.embedding_dim + h * self.head_dim;
-                @memcpy(self.cached_context.data[dst_start .. dst_start + self.head_dim], src_row);
+                // Store scores
+                for (0..seq_len) |r| {
+                    const global_r = batch_offset + r;
+                    const src_row = scores.data[r * seq_len .. (r + 1) * seq_len];
+                    const dst_row = self.cached_attention_scores.data[(h * total_rows + global_r) * seq_len .. (h * total_rows + global_r + 1) * seq_len];
+                    @memcpy(dst_row, src_row);
+                }
+
+                // Compute context for this head: scores * V
+                var context_h = try scores.dot(&v_h);
+                defer context_h.deinit();
+                scores.deinit(); // Now we can free scores
+
+                // Concatenate into cached_context
+                for (0..seq_len) |r| {
+                    const global_r = batch_offset + r;
+                    const src_row = context_h.data[r * self.head_dim .. (r + 1) * self.head_dim];
+                    const dst_start = global_r * self.embedding_dim + h * self.head_dim;
+                    @memcpy(self.cached_context.data[dst_start .. dst_start + self.head_dim], src_row);
+                }
             }
         }
 
@@ -216,88 +322,96 @@ pub const SelfAttention = struct {
         var grad_v = try Matrix.initZeros(self.allocator, self.cached_v.rows, self.cached_v.cols);
         defer grad_v.deinit();
 
-        const seq_len = self.cached_input.rows;
+        const total_rows = self.cached_input.rows;
+        const seq_len = total_rows / self.batch_size;
         const dk_sqrt = std.math.sqrt(@as(f32, @floatFromInt(self.head_dim)));
 
-        for (0..self.num_heads) |h| {
-            // Reconstruct Q_h, K_h, V_h, Scores_h for backward pass
-            var q_h = try Matrix.init(self.allocator, seq_len, self.head_dim);
-            defer q_h.deinit();
-            var k_h = try Matrix.init(self.allocator, seq_len, self.head_dim);
-            defer k_h.deinit();
-            var v_h = try Matrix.init(self.allocator, seq_len, self.head_dim);
-            defer v_h.deinit();
-            var scores_h = try Matrix.init(self.allocator, seq_len, seq_len);
-            defer scores_h.deinit();
+        for (0..self.batch_size) |b| {
+            const batch_offset = b * seq_len;
 
-            for (0..seq_len) |r| {
-                const start = h * self.head_dim;
-                const end = start + self.head_dim;
-                @memcpy(q_h.data[r * self.head_dim .. (r + 1) * self.head_dim], self.cached_q.data[r * self.embedding_dim + start .. r * self.embedding_dim + end]);
-                @memcpy(k_h.data[r * self.head_dim .. (r + 1) * self.head_dim], self.cached_k.data[r * self.embedding_dim + start .. r * self.embedding_dim + end]);
-                @memcpy(v_h.data[r * self.head_dim .. (r + 1) * self.head_dim], self.cached_v.data[r * self.embedding_dim + start .. r * self.embedding_dim + end]);
+            for (0..self.num_heads) |h| {
+                // Reconstruct Q_h, K_h, V_h, Scores_h for backward pass
+                var q_h = try Matrix.init(self.allocator, seq_len, self.head_dim);
+                defer q_h.deinit();
+                var k_h = try Matrix.init(self.allocator, seq_len, self.head_dim);
+                defer k_h.deinit();
+                var v_h = try Matrix.init(self.allocator, seq_len, self.head_dim);
+                defer v_h.deinit();
+                var scores_h = try Matrix.init(self.allocator, seq_len, seq_len);
+                defer scores_h.deinit();
 
-                const score_src = self.cached_attention_scores.data[(h * seq_len + r) * seq_len .. (h * seq_len + r + 1) * seq_len];
-                @memcpy(scores_h.data[r * seq_len .. (r + 1) * seq_len], score_src);
-            }
+                for (0..seq_len) |r| {
+                    const global_r = batch_offset + r;
+                    const start = h * self.head_dim;
+                    const end = start + self.head_dim;
+                    @memcpy(q_h.data[r * self.head_dim .. (r + 1) * self.head_dim], self.cached_q.data[global_r * self.embedding_dim + start .. global_r * self.embedding_dim + end]);
+                    @memcpy(k_h.data[r * self.head_dim .. (r + 1) * self.head_dim], self.cached_k.data[global_r * self.embedding_dim + start .. global_r * self.embedding_dim + end]);
+                    @memcpy(v_h.data[r * self.head_dim .. (r + 1) * self.head_dim], self.cached_v.data[global_r * self.embedding_dim + start .. global_r * self.embedding_dim + end]);
 
-            // Extract grad_context for this head
-            var grad_context_h = try Matrix.init(self.allocator, seq_len, self.head_dim);
-            defer grad_context_h.deinit();
-            for (0..seq_len) |r| {
-                const start = h * self.head_dim;
-                const end = start + self.head_dim;
-                @memcpy(grad_context_h.data[r * self.head_dim .. (r + 1) * self.head_dim], grad_context.data[r * self.embedding_dim + start .. r * self.embedding_dim + end]);
-            }
+                    const score_src = self.cached_attention_scores.data[(h * total_rows + global_r) * seq_len .. (h * total_rows + global_r + 1) * seq_len];
+                    @memcpy(scores_h.data[r * seq_len .. (r + 1) * seq_len], score_src);
+                }
 
-            // dV = Scores^T * dContext
-            var scores_h_t = try scores_h.transpose();
-            defer scores_h_t.deinit();
-            var grad_v_h = try scores_h_t.dot(&grad_context_h);
-            defer grad_v_h.deinit();
+                // Extract grad_context for this head
+                var grad_context_h = try Matrix.init(self.allocator, seq_len, self.head_dim);
+                defer grad_context_h.deinit();
+                for (0..seq_len) |r| {
+                    const global_r = batch_offset + r;
+                    const start = h * self.head_dim;
+                    const end = start + self.head_dim;
+                    @memcpy(grad_context_h.data[r * self.head_dim .. (r + 1) * self.head_dim], grad_context.data[global_r * self.embedding_dim + start .. global_r * self.embedding_dim + end]);
+                }
 
-            // dScores = dContext * V^T
-            var v_h_t = try v_h.transpose();
-            defer v_h_t.deinit();
-            var grad_scores_h = try grad_context_h.dot(&v_h_t);
-            defer grad_scores_h.deinit();
+                // dV = Scores^T * dContext
+                var scores_h_t = try scores_h.transpose();
+                defer scores_h_t.deinit();
+                var grad_v_h = try scores_h_t.dot(&grad_context_h);
+                defer grad_v_h.deinit();
 
-            // Backprop through Softmax
-            for (0..seq_len) |r| {
-                const score_row = scores_h.data[r * seq_len .. (r + 1) * seq_len];
-                const grad_row = grad_scores_h.data[r * seq_len .. (r + 1) * seq_len];
-                var dot_product: f32 = 0;
-                for (score_row, grad_row) |s, g| dot_product += s * g;
-                for (score_row, grad_row) |s, *g| g.* = s * (g.* - dot_product);
-                // Backprop through scaling
-                for (grad_row) |*g| g.* /= dk_sqrt;
-            }
+                // dScores = dContext * V^T
+                var v_h_t = try v_h.transpose();
+                defer v_h_t.deinit();
+                var grad_scores_h = try grad_context_h.dot(&v_h_t);
+                defer grad_scores_h.deinit();
 
-            // dQ = dScores * K
-            var grad_q_h = try grad_scores_h.dot(&k_h);
-            defer grad_q_h.deinit();
+                // Backprop through Softmax
+                for (0..seq_len) |r| {
+                    const score_row = scores_h.data[r * seq_len .. (r + 1) * seq_len];
+                    const grad_row = grad_scores_h.data[r * seq_len .. (r + 1) * seq_len];
+                    var dot_product: f32 = 0;
+                    for (score_row, grad_row) |s, g| dot_product += s * g;
+                    for (score_row, grad_row) |s, *g| g.* = s * (g.* - dot_product);
+                    // Backprop through scaling
+                    for (grad_row) |*g| g.* /= dk_sqrt;
+                }
 
-            // dK = dScores^T * Q
-            var grad_scores_h_t = try grad_scores_h.transpose();
-            defer grad_scores_h_t.deinit();
-            var grad_k_h = try grad_scores_h_t.dot(&q_h);
-            defer grad_k_h.deinit();
+                // dQ = dScores * K
+                var grad_q_h = try grad_scores_h.dot(&k_h);
+                defer grad_q_h.deinit();
 
-            // Accumulate into global grad_q, grad_k, grad_v
-            for (0..seq_len) |r| {
-                const start = h * self.head_dim;
-                const end = start + self.head_dim;
-                const dst_q = grad_q.data[r * self.embedding_dim + start .. r * self.embedding_dim + end];
-                const src_q = grad_q_h.data[r * self.head_dim .. (r + 1) * self.head_dim];
-                for (dst_q, src_q) |*d, s| d.* += s;
+                // dK = dScores^T * Q
+                var grad_scores_h_t = try grad_scores_h.transpose();
+                defer grad_scores_h_t.deinit();
+                var grad_k_h = try grad_scores_h_t.dot(&q_h);
+                defer grad_k_h.deinit();
 
-                const dst_k = grad_k.data[r * self.embedding_dim + start .. r * self.embedding_dim + end];
-                const src_k = grad_k_h.data[r * self.head_dim .. (r + 1) * self.head_dim];
-                for (dst_k, src_k) |*d, s| d.* += s;
+                // Accumulate into global grad_q, grad_k, grad_v
+                for (0..seq_len) |r| {
+                    const global_r = batch_offset + r;
+                    const start = h * self.head_dim;
+                    const end = start + self.head_dim;
+                    const dst_q = grad_q.data[global_r * self.embedding_dim + start .. global_r * self.embedding_dim + end];
+                    const src_q = grad_q_h.data[r * self.head_dim .. (r + 1) * self.head_dim];
+                    for (dst_q, src_q) |*d, s| d.* += s;
 
-                const dst_v = grad_v.data[r * self.embedding_dim + start .. r * self.embedding_dim + end];
-                const src_v = grad_v_h.data[r * self.head_dim .. (r + 1) * self.head_dim];
-                for (dst_v, src_v) |*d, s| d.* += s;
+                    const dst_k = grad_k.data[global_r * self.embedding_dim + start .. global_r * self.embedding_dim + end];
+                    const src_k = grad_k_h.data[r * self.head_dim .. (r + 1) * self.head_dim];
+                    for (dst_k, src_k) |*d, s| d.* += s;
+
+                    const dst_v = grad_v.data[global_r * self.embedding_dim + start .. global_r * self.embedding_dim + end];
+                    const src_v = grad_v_h.data[r * self.head_dim .. (r + 1) * self.head_dim];
+                    for (dst_v, src_v) |*d, s| d.* += s;
+                }
             }
         }
 
@@ -349,6 +463,66 @@ pub const SelfAttention = struct {
     pub fn toLayer(self: *SelfAttention) layer.Layer {
         return layer.toLayer(SelfAttention)(self);
     }
+
+    pub fn save(self: *const SelfAttention, writer: anytype) !void {
+        try writer.writeInt(usize, self.embedding_dim, .little);
+        try writer.writeInt(usize, self.num_heads, .little);
+        try writer.writeInt(usize, self.head_dim, .little);
+
+        try self.w_q.save(writer);
+        try self.w_k.save(writer);
+        try self.w_v.save(writer);
+        try self.w_o.save(writer);
+    }
+
+    pub fn load(allocator: std.mem.Allocator, reader: anytype) !*SelfAttention {
+        const embedding_dim = try reader.readInt(usize, .little);
+        const num_heads = try reader.readInt(usize, .little);
+        const head_dim = try reader.readInt(usize, .little);
+
+        const self = try allocator.create(SelfAttention);
+        errdefer allocator.destroy(self);
+
+        var w_q = try Matrix.load(allocator, reader);
+        errdefer w_q.deinit();
+
+        var w_k = try Matrix.load(allocator, reader);
+        errdefer w_k.deinit();
+
+        var w_v = try Matrix.load(allocator, reader);
+        errdefer w_v.deinit();
+
+        var w_o = try Matrix.load(allocator, reader);
+        errdefer w_o.deinit();
+
+        self.* = .{
+            .allocator = allocator,
+            .embedding_dim = embedding_dim,
+            .num_heads = num_heads,
+            .head_dim = head_dim,
+            .w_q = w_q,
+            .w_k = w_k,
+            .w_v = w_v,
+            .w_o = w_o,
+            .batch_size = 1,
+            .has_cache = false,
+            .cached_input = try Matrix.init(allocator, 0, 0),
+            .cached_q = try Matrix.init(allocator, 0, 0),
+            .cached_k = try Matrix.init(allocator, 0, 0),
+            .cached_v = try Matrix.init(allocator, 0, 0),
+            .cached_attention_scores = try Matrix.init(allocator, 0, 0),
+            .cached_context = try Matrix.init(allocator, 0, 0),
+            .k_cache = try Matrix.initZeros(allocator, 1 * lib.config.max_seq_len, embedding_dim),
+            .v_cache = try Matrix.initZeros(allocator, 1 * lib.config.max_seq_len, embedding_dim),
+            .cache_len = 0,
+            .max_seq_len = lib.config.max_seq_len,
+            .optimizer_w_q = try Adam.init(allocator, embedding_dim, embedding_dim),
+            .optimizer_w_k = try Adam.init(allocator, embedding_dim, embedding_dim),
+            .optimizer_w_v = try Adam.init(allocator, embedding_dim, embedding_dim),
+            .optimizer_w_o = try Adam.init(allocator, embedding_dim, embedding_dim),
+        };
+        return self;
+    }
 };
 
 test "SelfAttention Forward/Backward" {
@@ -357,7 +531,7 @@ test "SelfAttention Forward/Backward" {
     // We can't easily check config values here, but we can check if init succeeds.
 
     const embedding_dim = lib.config.embedding_dim;
-    var attn = try SelfAttention.init(allocator, embedding_dim);
+    var attn = try SelfAttention.init(allocator, embedding_dim, lib.config.num_heads, 1, lib.config.max_seq_len);
     defer attn.deinit();
 
     const seq_len = 10;
@@ -365,7 +539,7 @@ test "SelfAttention Forward/Backward" {
     defer input.deinit();
 
     // Forward
-    var output = try attn.forward(input);
+    var output = try attn.forward(input, false);
     defer output.deinit();
 
     try std.testing.expectEqual(seq_len, output.rows);
@@ -380,4 +554,43 @@ test "SelfAttention Forward/Backward" {
 
     try std.testing.expectEqual(seq_len, grad_input.rows);
     try std.testing.expectEqual(embedding_dim, grad_input.cols);
+}
+
+test "SelfAttention Causal Masking with Cache" {
+    const allocator = std.testing.allocator;
+    const embedding_dim = 16;
+    const num_heads = 2;
+    const seq_len = 4;
+    var attn = try SelfAttention.init(allocator, embedding_dim, num_heads, 1, 10);
+    defer attn.deinit();
+
+    var input = try Matrix.initRandom(allocator, seq_len, embedding_dim, 0.0, 1.0);
+    defer input.deinit();
+
+    // Forward with use_cache=true
+    // This simulates processing a prompt of length 4.
+    var output = try attn.forward(input, true);
+    defer output.deinit();
+
+    // Check cached_attention_scores
+    // Should be (num_heads * seq_len) x seq_len
+    // For each head, the 4x4 score matrix should be lower triangular (masked).
+    // scores[i, j] should be -inf (or very small after softmax, but we check pre-softmax scores if possible?
+    // Wait, cached_attention_scores stores POST-softmax scores.
+    // So masked values should be 0.0.
+
+    const scores = attn.cached_attention_scores;
+    // Rows: num_heads * seq_len
+    // Cols: seq_len (since cache_len = seq_len after first pass)
+
+    for (0..num_heads) |h| {
+        for (0..seq_len) |r| {
+            for (r + 1..seq_len) |c| {
+                const global_r = h * seq_len + r;
+                const score = scores.at(global_r, c);
+                // Expect 0.0 (masked)
+                try std.testing.expectEqual(@as(f32, 0.0), score);
+            }
+        }
+    }
 }
