@@ -78,7 +78,7 @@ fn parseF32Default(s: []const u8, default_val: f32) f32 {
     return std.fmt.parseFloat(f32, s) catch default_val;
 }
 
-fn trainAndMaybeRepl(allocator: std.mem.Allocator, pretrain_path: []const u8, chat_path: []const u8, pre_epochs: usize, pre_lr: f32, chat_epochs: usize, chat_lr: f32, enter_repl: bool) !void {
+fn trainAndMaybeRepl(allocator: std.mem.Allocator, pretrain_path: []const u8, chat_path: []const u8, pre_epochs: usize, pre_lr: f32, chat_epochs: usize, chat_lr: f32, enter_repl: bool, save_model_path: ?[]const u8) !void {
     var pretrain = try readJsonLines(allocator, pretrain_path);
     defer pretrain.deinit(allocator);
     var chat = try readJsonLines(allocator, chat_path);
@@ -121,6 +121,11 @@ fn trainAndMaybeRepl(allocator: std.mem.Allocator, pretrain_path: []const u8, ch
     std.debug.print("Output: {s}\n", .{prediction_after});
     std.debug.print("======================\n\n", .{});
 
+    // Save model if path is provided
+    if (save_model_path) |path| {
+        try model.save(path);
+    }
+
     if (!enter_repl) return;
 
     std.debug.print("\n--- Interactive Mode ---\n", .{});
@@ -161,8 +166,10 @@ fn execRoot(ctx: chilli.CommandContext) !void {
 
     const pre_lr = parseF32Default(pre_lr_s, 0.0005);
     const chat_lr = parseF32Default(chat_lr_s, 0.0001);
+    const save_model_path_str = try ctx.getFlag("save-model", []const u8);
+    const save_model_path: ?[]const u8 = if (save_model_path_str.len > 0) save_model_path_str else null;
 
-    try trainAndMaybeRepl(allocator, pretrain_path, chat_path, pre_epochs, pre_lr, chat_epochs, chat_lr, repl_flag != 0);
+    try trainAndMaybeRepl(allocator, pretrain_path, chat_path, pre_epochs, pre_lr, chat_epochs, chat_lr, repl_flag != 0, save_model_path);
 }
 
 fn execPredict(ctx: chilli.CommandContext) !void {
@@ -248,6 +255,12 @@ pub fn main() anyerror!void {
         .description = "Enter interactive mode after training (1=true, 0=false)",
         .type = .Int,
         .default_value = .{ .Int = 1 },
+    });
+    try root_cmd.addFlag(.{
+        .name = "save-model",
+        .description = "Path to save the trained model",
+        .type = .String,
+        .default_value = .{ .String = "" },
     });
 
     var predict_cmd = try chilli.Command.init(allocator, .{

@@ -41,6 +41,41 @@ pub const Vocab = struct {
     pub fn size(self: Vocab) usize {
         return self.words.items.len;
     }
+
+    pub fn save(self: *const Vocab, writer: anytype) !void {
+        // Write vocab size
+        try writer.writeInt(usize, self.words.items.len, .little);
+
+        // Write each word
+        for (self.words.items) |word| {
+            try writer.writeInt(usize, word.len, .little);
+            try writer.writeAll(word);
+        }
+    }
+
+    pub fn load(allocator: std.mem.Allocator, reader: anytype) !Vocab {
+        var vocab = Vocab.init(allocator);
+        errdefer vocab.deinit();
+
+        // Read vocab size
+        const vocab_size = try reader.readInt(usize, .little);
+
+        // Read each word
+        var word_list = std.ArrayList([]const u8){};
+        defer word_list.deinit(allocator);
+
+        for (0..vocab_size) |_| {
+            const word_len = try reader.readInt(usize, .little);
+            const word = try allocator.alloc(u8, word_len);
+            errdefer allocator.free(word);
+
+            try reader.readNoEof(word);
+            try word_list.append(allocator, word);
+        }
+
+        try vocab.build(word_list.items);
+        return vocab;
+    }
 };
 
 test "Vocab init and build" {

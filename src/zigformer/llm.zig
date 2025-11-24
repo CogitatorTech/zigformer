@@ -260,4 +260,65 @@ pub const LLM = struct {
             }
         }
     }
+
+    pub fn save(self: *const LLM, path: []const u8) !void {
+        const file = try std.fs.cwd().createFile(path, .{});
+        defer file.close();
+
+        // Write magic number "ZGFM"
+        try file.writeAll("ZGFM");
+
+        // Write version
+        const version: u32 = 1;
+        try file.writeAll(std.mem.asBytes(&version));
+
+        // Save vocabulary - we'll write it to a buffer first
+        var buffer = std.ArrayList(u8){};
+        defer buffer.deinit(self.allocator);
+
+        const writer = buffer.writer(self.allocator);
+        try self.vocab.save(writer);
+        try file.writeAll(buffer.items);
+
+        std.debug.print("Model saved to {s}\n", .{path});
+    }
+
+    pub fn load(allocator: std.mem.Allocator, path: []const u8) !LLM {
+        const file = try std.fs.cwd().openFile(path, .{});
+        defer file.close();
+
+        // Read and verify magic number
+        var magic: [4]u8 = undefined;
+        _ = try file.readAll(&magic);
+        if (!std.mem.eql(u8, &magic, "ZGFM")) {
+            return error.InvalidModelFile;
+        }
+
+        // Read version
+        var version_bytes: [4]u8 = undefined;
+        _ = try file.readAll(&version_bytes);
+        const version = std.mem.readInt(u32, &version_bytes, .little);
+        if (version != 1) {
+            return error.UnsupportedModelVersion;
+        }
+
+        // Read the rest of the file into a buffer for vocabulary loading
+        const file_size = try file.getEndPos();
+        const remaining_size = file_size - 8; // 4 bytes magic + 4 bytes version
+        const buffer = try allocator.alloc(u8, remaining_size);
+        defer allocator.free(buffer);
+        _ = try file.readAll(buffer);
+
+        // Load vocabulary from buffer
+        var stream = std.io.fixedBufferStream(buffer);
+        const reader = stream.reader();
+        const vocab = try Vocab.load(allocator, reader);
+        errdefer vocab.deinit();
+
+        // Initialize model with loaded vocabulary
+        const model = try LLM.init(allocator, vocab);
+
+        std.debug.print("Model loaded from {s}\n", .{path});
+        return model;
+    }
 };
