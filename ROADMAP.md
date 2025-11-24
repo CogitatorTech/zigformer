@@ -15,12 +15,12 @@ This document outlines the features implemented in ZigFormer and the future goal
 - [x] Residual connections
 
 ### Training
-- [x] Adam optimizer
+- [x] Optimizer (Adam)
 - [x] Gradient clipping
 - [x] Cross-entropy loss
 - [x] Training loop (pre-training and fine-tuning)
+- [x] Learning rate scheduling
 - [ ] Model checkpointing (save and load)
-- [ ] Learning rate scheduling
 
 ### Inference
 - [x] Greedy decoding
