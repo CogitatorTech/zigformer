@@ -120,6 +120,182 @@ pub const LLM = struct {
         return tokens;
     }
 
+    fn topKSampling(probs: *const Matrix, k: usize, allocator: std.mem.Allocator) !std.ArrayList(u32) {
+        var tokens = std.ArrayList(u32){};
+        try tokens.ensureTotalCapacity(allocator, probs.rows);
+
+        var prng = std.Random.DefaultPrng.init(@intCast(std.time.timestamp()));
+        const random = prng.random();
+
+        for (0..probs.rows) |r| {
+            // Create array of (index, prob) pairs
+            var indices = try allocator.alloc(struct { idx: u32, prob: f32 }, probs.cols);
+            defer allocator.free(indices);
+
+            for (0..probs.cols) |c| {
+                indices[c] = .{ .idx = @intCast(c), .prob = probs.at(r, c) };
+            }
+
+            // Sort by probability (descending)
+            std.sort.pdq(@TypeOf(indices[0]), indices, {}, struct {
+                fn lessThan(_: void, a: @TypeOf(indices[0]), b: @TypeOf(indices[0])) bool {
+                    return a.prob > b.prob;
+                }
+            }.lessThan);
+
+            // Keep only top-k
+            const top_k = @min(k, probs.cols);
+
+            // Renormalize probabilities
+            var sum: f32 = 0.0;
+            for (0..top_k) |i| {
+                sum += indices[i].prob;
+            }
+
+            // Sample from top-k
+            const rand_val = random.float(f32) * sum;
+            var cumsum: f32 = 0.0;
+            var selected_idx: u32 = indices[0].idx;
+
+            for (0..top_k) |i| {
+                cumsum += indices[i].prob;
+                if (rand_val <= cumsum) {
+                    selected_idx = indices[i].idx;
+                    break;
+                }
+            }
+
+            try tokens.append(allocator, selected_idx);
+        }
+        return tokens;
+    }
+
+    fn topPSampling(probs: *const Matrix, p: f32, allocator: std.mem.Allocator) !std.ArrayList(u32) {
+        var tokens = std.ArrayList(u32){};
+        try tokens.ensureTotalCapacity(allocator, probs.rows);
+
+        var prng = std.Random.DefaultPrng.init(@intCast(std.time.timestamp()));
+        const random = prng.random();
+
+        for (0..probs.rows) |r| {
+            // Create array of (index, prob) pairs
+            var indices = try allocator.alloc(struct { idx: u32, prob: f32 }, probs.cols);
+            defer allocator.free(indices);
+
+            for (0..probs.cols) |c| {
+                indices[c] = .{ .idx = @intCast(c), .prob = probs.at(r, c) };
+            }
+
+            // Sort by probability (descending)
+            std.sort.pdq(@TypeOf(indices[0]), indices, {}, struct {
+                fn lessThan(_: void, a: @TypeOf(indices[0]), b: @TypeOf(indices[0])) bool {
+                    return a.prob > b.prob;
+                }
+            }.lessThan);
+
+            // Find cutoff for nucleus (top-p)
+            var cumsum: f32 = 0.0;
+            var cutoff: usize = 0;
+            for (0..probs.cols) |i| {
+                cumsum += indices[i].prob;
+                cutoff = i + 1;
+                if (cumsum >= p) break;
+            }
+
+            // Renormalize probabilities in nucleus
+            var sum: f32 = 0.0;
+            for (0..cutoff) |i| {
+                sum += indices[i].prob;
+            }
+
+            // Sample from nucleus
+            const rand_val = random.float(f32) * sum;
+            cumsum = 0.0;
+            var selected_idx: u32 = indices[0].idx;
+
+            for (0..cutoff) |i| {
+                cumsum += indices[i].prob;
+                if (rand_val <= cumsum) {
+                    selected_idx = indices[i].idx;
+                    break;
+                }
+            }
+
+            try tokens.append(allocator, selected_idx);
+        }
+        return tokens;
+    }
+
+    pub const SamplingMode = enum {
+        greedy,
+        topk,
+        topp,
+    };
+
+    pub fn predictWithSampling(self: *LLM, text: []const u8, mode: SamplingMode, k: usize, p: f32) ![]u8 {
+        var tokenized = try self.tokenize(text);
+        defer tokenized.deinit(self.allocator);
+
+        var output_tokens = std.ArrayList(u32){};
+        defer output_tokens.deinit(self.allocator);
+
+        const input_len = tokenized.items.len;
+        if (input_len == 0 or input_len >= lib.config.max_seq_len) {
+            return self.allocator.dupe(u8, "");
+        }
+
+        const end_token = self.vocab.encode("</s>").?;
+
+        for (0..(lib.config.max_seq_len - input_len)) |_| {
+            var input_matrix = try Matrix.init(self.allocator, 1, tokenized.items.len);
+            defer input_matrix.deinit();
+            for (tokenized.items, 0..) |tok, i| {
+                input_matrix.data[i] = @floatFromInt(tok);
+            }
+
+            var temp_matrix = input_matrix;
+            for (self.network.items) |*layer| {
+                const next_matrix = try layer.forward(temp_matrix);
+                if (temp_matrix.data.ptr != input_matrix.data.ptr) {
+                    temp_matrix.deinit();
+                }
+                temp_matrix = next_matrix;
+            }
+
+            var logits = temp_matrix;
+
+            var last_logit = try logits.getRow(logits.rows - 1);
+            logits.deinit();
+            defer last_logit.deinit();
+
+            softmax(&last_logit);
+
+            // Use appropriate sampling method
+            var next_tokens = switch (mode) {
+                .greedy => try greedyDecode(&last_logit),
+                .topk => try topKSampling(&last_logit, k, self.allocator),
+                .topp => try topPSampling(&last_logit, p, self.allocator),
+            };
+            defer next_tokens.deinit(self.allocator);
+
+            const next_token = next_tokens.items[0];
+            try output_tokens.append(self.allocator, next_token);
+            try tokenized.append(self.allocator, next_token);
+
+            if (next_token == end_token) break;
+        }
+
+        var result_builder = std.ArrayList(u8){};
+        defer result_builder.deinit(self.allocator);
+        for (output_tokens.items, 0..) |tok, i| {
+            if (self.vocab.decode(tok)) |word| {
+                if (i > 0) try result_builder.append(self.allocator, ' ');
+                try result_builder.appendSlice(self.allocator, word);
+            }
+        }
+        return result_builder.toOwnedSlice(self.allocator);
+    }
+
     pub fn predict(self: *LLM, text: []const u8) ![]u8 {
         var tokenized = try self.tokenize(text);
         defer tokenized.deinit(self.allocator);

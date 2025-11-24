@@ -25,7 +25,7 @@ This document outlines the features implemented in ZigFormer and the future goal
 ### Inference
 - [x] Greedy decoding
 - [x] KV caching
-- [ ] Top-k and top-p sampling
+- [x] Top-k and top-p sampling
 - [ ] Beam search
 
 ### Usability
