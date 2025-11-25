@@ -1,11 +1,21 @@
+//! Neural network layer interface.
+//!
+//! Defines the common interface for all neural network layers using
+//! runtime polymorphism via vtables. This allows building dynamic
+//! models with heterogeneous layers.
+
 const std = @import("std");
 const linalg = @import("linear_algebra.zig");
 const Matrix = linalg.Matrix;
 
+/// Abstract base type for neural network layers.
+///
+/// Uses a vtable for dynamic dispatch of forward/backward passes.
 pub const Layer = struct {
     self: *anyopaque,
     vtable: *const VTable,
 
+    /// Virtual table defining the layer interface.
     pub const VTable = struct {
         forward: *const fn (self: *anyopaque, input: Matrix, use_cache: bool) anyerror!Matrix,
         backward: *const fn (self: *anyopaque, grads: Matrix, lr: f32) anyerror!Matrix,
@@ -35,6 +45,10 @@ pub const Layer = struct {
     }
 };
 
+/// Convert a concrete layer type to the abstract Layer interface.
+///
+/// Wraps a pointer to a specific layer struct (e.g., Linear, Conv) into
+/// a Layer interface using a generated vtable.
 pub fn toLayer(comptime T: type) fn (ptr: *T) Layer {
     return struct {
         fn toLayerImpl(ptr: *T) Layer {

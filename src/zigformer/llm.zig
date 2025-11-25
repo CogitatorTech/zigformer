@@ -1,3 +1,33 @@
+//! Large Language Model (LLM).
+//!
+//! GPT-style autoregressive language model with:
+//! - Token and positional embeddings
+//! - Multiple transformer blocks with self-attention
+//! - Output projection to vocabulary
+//! - Training with cross-entropy loss
+//! - Multiple inference strategies (greedy, sampling, beam search)
+//!
+//! Model Architecture:
+//!   Input tokens
+//!     ↓
+//!   Embeddings (token + position)
+//!     ↓
+//!   TransformerBlock × N  (self-attention + FFN)
+//!     ↓
+//!   OutputProjection (→ vocabulary logits)
+//!     ↓
+//!   Softmax / Sampling
+//!
+//! Training:
+//!   - Cross-entropy loss with next-token prediction
+//!   - Adam optimizer with learning rate scheduling
+//!   - Gradient accumulation for large effective batch sizes
+//!
+//! Inference:
+//!   - Greedy decoding: argmax at each step
+//!   - Top-k/top-p sampling: sample from filtered distribution
+//!   - Beam search: maintain k best sequences
+
 const std = @import("std");
 const lib = @import("../lib.zig");
 const linalg = lib.linalg;
@@ -8,10 +38,14 @@ const Embeddings = lib.embeddings.Embeddings;
 const TransformerBlock = lib.transformer.TransformerBlock;
 const OutputProjection = lib.output_projection.OutputProjection;
 
+/// Beam search node for maintaining candidate sequences.
+///
+/// Used during beam search decoding to track partial sequences,
+/// their cumulative log probabilities, and completion status.
 pub const BeamNode = struct {
-    sequence: std.ArrayListUnmanaged(u32),
-    score: f32,
-    finished: bool,
+    sequence: std.ArrayListUnmanaged(u32), // Token IDs in this sequence
+    score: f32, // Cumulative log probability
+    finished: bool, // Whether sequence ended with </s>
 
     pub fn init(allocator: std.mem.Allocator, initial_seq: []const u32, initial_score: f32) !BeamNode {
         var seq = std.ArrayListUnmanaged(u32){};
@@ -42,6 +76,10 @@ fn compareBeamNodes(_: void, lhs: BeamNode, rhs: BeamNode) bool {
     return lhs.score > rhs.score; // Descending order
 }
 
+/// Large Language Model with transformer architecture.
+///
+/// A complete autoregressive language model for text generation.
+/// Supports training, inference, and model persistence (save/load).
 pub const LLM = struct {
     allocator: std.mem.Allocator,
     vocab: Vocab,

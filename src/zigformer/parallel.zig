@@ -1,8 +1,16 @@
+//! Parallel computation utilities.
+//!
+//! Provides thread-pool based parallel execution for computationally intensive
+//! operations like matrix multiplication.
+
 const std = @import("std");
 const linalg = @import("linear_algebra.zig");
 const Matrix = linalg.Matrix;
 
-/// Parallel matrix multiplication using thread pool
+/// Parallel matrix multiplication using thread pool.
+///
+/// Splits the work across multiple threads by dividing rows of the first matrix.
+/// Falls back to sequential execution for small matrices or single thread.
 pub fn dotParallel(a: *const Matrix, b: *const Matrix, num_threads: usize) !Matrix {
     std.debug.assert(a.cols == b.rows);
     var result = try Matrix.init(a.allocator, a.rows, b.cols);

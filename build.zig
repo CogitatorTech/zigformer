@@ -1,5 +1,5 @@
-// file: build.zig
 const std = @import("std");
+const fs = std.fs;
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -64,16 +64,18 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run unit tests");
     test_step.dependOn(&test_run_cmd.step);
 
-    // Create a "docs" step to generate documentation.
-    const docs_step = b.step("docs", "Generate documentation");
-    const docs_obj = b.addObject(.{
-        .name = "zigformer",
-        .root_module = zigformer_mod,
+    // --- Docs Setup ---
+    const docs_step = b.step("docs", "Generate API documentation");
+    const doc_install_path = "zig-out/docs";
+
+    // Create docs directory if it doesn't exist (portable across all platforms)
+    fs.cwd().makePath(doc_install_path) catch {};
+
+    const gen_docs_cmd = b.addSystemCommand(&[_][]const u8{
+        b.graph.zig_exe,
+        "build-lib",
+        "src/lib.zig",
+        "-femit-docs=" ++ doc_install_path,
     });
-    const install_docs = b.addInstallDirectory(.{
-        .source_dir = docs_obj.getEmittedDocs(),
-        .install_dir = .prefix,
-        .install_subdir = "docs",
-    });
-    docs_step.dependOn(&install_docs.step);
+    docs_step.dependOn(&gen_docs_cmd.step);
 }

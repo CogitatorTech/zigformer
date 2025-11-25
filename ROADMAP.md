@@ -6,6 +6,7 @@ This document outlines the features implemented in ZigFormer and the future goal
 > This roadmap is a work in progress and is subject to change.
 
 ### Core Architecture
+
 - [x] Tokenization (word-based)
 - [x] Vocabulary building
 - [x] Embedding layer (token + positional)
@@ -15,6 +16,7 @@ This document outlines the features implemented in ZigFormer and the future goal
 - [x] Residual connections
 
 ### Training
+
 - [x] Optimizer (Adam)
 - [x] Gradient clipping
 - [x] Cross-entropy loss
@@ -25,12 +27,14 @@ This document outlines the features implemented in ZigFormer and the future goal
 - [x] Gradient accumulation
 
 ### Inference
+
 - [x] Greedy decoding
 - [x] KV caching
 - [x] Top-k and top-p sampling
 - [x] Beam search
 
 ### Usability
+
 - [x] Command line interface
 - [x] Multi-threading support
 - [x] SIMD optimizations

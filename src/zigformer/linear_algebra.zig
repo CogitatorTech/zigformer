@@ -1,11 +1,37 @@
+//! Linear algebra operations for neural network computations.
+//!
+//! Provides a Matrix type and operations:
+//! - Matrix multiplication
+//! - Element-wise operations
+//! - Transpose
+//! - SIMD-optimized variants
+//!
+//! Mathematical notation:
+//! - Matrix multiplication: C = AB where C[i,j] = Σ_k A[i,k] * B[k,j]
+//! - Transpose: A^T where A^T[i,j] = A[j,i]
+//! - Element-wise add: C = A + B where C[i,j] = A[i,j] + B[i,j]
+
 const std = @import("std");
 
+/// Dense matrix representation.
+///
+/// Stores data in row-major format: A[i,j] is accessed as data[i * cols + j]
+/// All operations allocate new matrices and return them; the caller owns the memory.
 pub const Matrix = struct {
-    rows: usize,
-    cols: usize,
-    data: []f32,
+    rows: usize, // Number of rows
+    cols: usize, // Number of columns
+    data: []f32, // Contiguous array in row-major order
     allocator: std.mem.Allocator,
 
+    /// Initialize a matrix with uninitialized data.
+    ///
+    /// Parameters:
+    ///   allocator: Memory allocator
+    ///   rows: Number of rows
+    ///   cols: Number of columns
+    ///
+    /// Returns:
+    ///   Initialized matrix with allocated but uninitialized data
     pub fn init(allocator: std.mem.Allocator, rows: usize, cols: usize) !Matrix {
         const data = try allocator.alloc(f32, rows * cols);
         return Matrix{

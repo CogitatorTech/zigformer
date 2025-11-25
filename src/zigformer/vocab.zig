@@ -1,10 +1,22 @@
+//! Vocabulary management and tokenization.
+//!
+//! Word-level tokenization mapping between string tokens and integer IDs.
+//!
+//! The vocabulary maintains bidirectional mappings:
+//!  - Word → ID (for encoding text)
+//!  - ID → Word (for decoding predictions)
+
 const std = @import("std");
 
+/// Vocabulary mapping between tokens and IDs.
+///
+/// Maintains a simple word-level vocabulary with bidirectional lookup.
+/// Words are stored in insertion order, and IDs are assigned sequentially.
 pub const Vocab = struct {
     allocator: std.mem.Allocator,
-    encode_map: std.StringHashMap(u32),
-    decode_map: std.AutoHashMap(u32, []const u8),
-    words: std.ArrayList([]const u8),
+    encode_map: std.StringHashMap(u32), // Map from word string to token ID
+    decode_map: std.AutoHashMap(u32, []const u8), // Map from token ID to word string
+    words: std.ArrayList([]const u8), // Array of words indexed by token ID
     owns_words: bool, // true if words were allocated by load(), false if references from build()
 
     pub fn init(allocator: std.mem.Allocator) Vocab {

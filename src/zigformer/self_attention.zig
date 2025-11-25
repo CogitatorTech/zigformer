@@ -1,3 +1,14 @@
+//! Multi-head self-attention.
+//!
+//! Implements scaled dot-product attention with multiple heads.
+//!
+//! Mathematical formulation:
+//!  - Attention(Q, K, V) = softmax(QK^T / sqrt(d_k))V
+//!  - MultiHead(Q, K, V) = Concat(head_1, ..., head_h)W^O where head_i = Attention(QW_i^Q, KW_i^K, VW_i^V)
+//!
+//! References:
+//!  - "Attention Is All You Need" (Vaswani et al., 2017)
+
 const std = @import("std");
 const lib = @import("../lib.zig");
 const linalg = lib.linalg;
@@ -5,18 +16,34 @@ const Matrix = linalg.Matrix;
 const Adam = lib.optimizer.Adam;
 const layer = lib.layer;
 
+/// Multi-head self-attention layer.
+///
+/// Implements the attention mechanism that allows the model to focus on different
+/// parts of the input sequence. Each attention head learns to attend to different
+/// aspects of the representation.
+///
+/// Key concepts:
+/// - Query (Q): "What am I looking for?"
+/// - Key (K): "What do I contain?"
+/// - Value (V): "What information do I carry?"
+/// - Attention scores: Similarity between queries and keys
+/// - Context: Weighted sum of values based on attention scores
 pub const SelfAttention = struct {
     allocator: std.mem.Allocator,
-    embedding_dim: usize,
-    num_heads: usize,
-    head_dim: usize,
+    embedding_dim: usize, // Total dimension (must be divisible by num_heads)
+    num_heads: usize, // Number of parallel attention heads
+    head_dim: usize, // Dimension per head (embedding_dim / num_heads)
 
+    // Learnable weight matrices for Q, K, V projections and output
+    // In math notation: W^Q, W^K, W^V ∈ ℝ^(d_model × d_model)
     w_q: Matrix,
     w_k: Matrix,
     w_v: Matrix,
-    w_o: Matrix, // Output projection
+    w_o: Matrix, // Output projection matrix W^O
+
     batch_size: usize,
 
+    // Cached values for backward pass
     has_cache: bool,
     cached_input: Matrix,
     cached_q: Matrix,
@@ -25,23 +52,39 @@ pub const SelfAttention = struct {
     cached_attention_scores: Matrix, // Stores scores for all heads
     cached_context: Matrix, // Stores concatenated context before output projection
 
-    // KV Cache
+    // KV Cache for efficient autoregressive generation
     k_cache: Matrix,
     v_cache: Matrix,
     cache_len: usize,
     max_seq_len: usize,
 
+    // Optimizers for each weight matrix
     optimizer_w_q: Adam,
     optimizer_w_k: Adam,
     optimizer_w_v: Adam,
     optimizer_w_o: Adam,
 
+    /// Initialize a multi-head self-attention layer.
+    ///
+    /// Parameters:
+    ///   allocator: Memory allocator
+    ///   embedding_dim: Dimension of input embeddings (d_model)
+    ///   num_heads: Number of parallel attention heads (h)
+    ///   batch_size: Batch size for training/inference
+    ///   max_seq_len: Maximum sequence length for KV caching
+    ///
+    /// Returns:
+    ///   Initialized SelfAttention struct
+    ///
+    /// Errors:
+    ///   error.EmbeddingDimNotDivisibleByHeads: if embedding_dim % num_heads != 0
     pub fn init(allocator: std.mem.Allocator, embedding_dim: usize, num_heads: usize, batch_size: usize, max_seq_len: usize) !SelfAttention {
         if (embedding_dim % num_heads != 0) {
             return error.EmbeddingDimNotDivisibleByHeads;
         }
         const head_dim = embedding_dim / num_heads;
 
+        // Xavier/He initialization: std_dev = sqrt(2 / fan_in)
         const std_dev = std.math.sqrt(2.0 / @as(f32, @floatFromInt(embedding_dim)));
 
         return .{
@@ -72,6 +115,7 @@ pub const SelfAttention = struct {
         };
     }
 
+    /// Deallocate all resources used by this attention layer.
     pub fn deinit(self: *SelfAttention) void {
         self.w_q.deinit();
         self.w_k.deinit();
@@ -91,6 +135,10 @@ pub const SelfAttention = struct {
         self.optimizer_w_o.deinit();
     }
 
+    /// Reset the KV cache for autoregressive generation.
+    ///
+    /// This should be called between different sequences or when starting
+    /// a new generation task. It clears cached activations and resets cache length.
     pub fn resetCache(self: *SelfAttention) void {
         if (self.has_cache) {
             self.cached_input.deinit();
@@ -104,6 +152,23 @@ pub const SelfAttention = struct {
         self.cache_len = 0;
     }
 
+    /// Compute multi-head self-attention forward pass.
+    ///
+    /// Mathematical formulation:
+    ///   1. Linear projections: Q = XW^Q, K = XW^K, V = XW^V
+    ///   2. Split into heads: Q, K, V ∈ ℝ^(batch × seq_len × d_model) → h heads of ℝ^(batch × seq_len × d_k)
+    ///   3. Scaled dot-product attention: scores = QK^T / sqrt(d_k)
+    ///   4. Apply causal mask (for autoregressive models): scores[i,j] = -∞ if j > i
+    ///   5. Softmax: attention_weights = softmax(scores)
+    ///   6. Context: context = attention_weights × V
+    ///   7. Concatenate heads and project: output = Concat(head_1, ..., head_h)W^O
+    ///
+    /// Parameters:
+    ///   input: Input tensor of shape (seq_len, embedding_dim) or (batch_size * seq_len, embedding_dim)
+    ///   use_cache: Whether to use KV caching for efficient autoregressive generation
+    ///
+    /// Returns:
+    ///   Output tensor of same shape as input
     pub fn forward(self: *SelfAttention, input: Matrix, use_cache: bool) !Matrix {
         if (self.has_cache) {
             self.cached_input.deinit();

@@ -1,15 +1,45 @@
-const std = @import("std");
-const linalg = @import("linear_algebra.zig");
-const Matrix = linalg.Matrix;
+//! Optimization algorithms.
+//!
+//! Implements Adam (Adaptive Moment Estimation) optimizer.
+//!
+//! Adam update rules:
+//!  - m_t = β₁ * m_{t-1} + (1 - β₁) * g_t           (first moment)
+//!  - v_t = β₂ * v_{t-1} + (1 - β₂) * g_t²          (second moment)
+//!  - m̂_t = m_t / (1 - β₁^t)                        (bias correction)
+//!  - v̂_t = v_t / (1 - β₂^t)                        (bias correction)
+//!  - θ_t = θ_{t-1} - α * m̂_t / (sqrt(v̂_t) + ε)    (parameter update)
+//!
+//! where:
+//!  - g_t is the gradient at time t
+//!  - α is the learning rate
+//!  - β₁, β₂ are exponential decay rates (typically 0.9, 0.999)
+//!  - ε is a small constant for numerical stability (1e-8)
+//!
+//! References:
+//!  - "Adam: A Method for Stochastic Optimization" (Kingma & Ba, 2015)
 
+const std = @import("std");
+const lib = @import("../lib.zig");
+const Matrix = lib.linalg.Matrix;
+
+/// Adam optimizer.
+///
+/// Maintains running averages of gradients and squared gradients for each parameter.
+/// Adapts learning rates per-parameter based on gradient statistics.
 pub const Adam = struct {
-    beta1: f32 = 0.9,
-    beta2: f32 = 0.999,
-    epsilon: f32 = 1e-8,
-    timestep: u32 = 0,
-    m: Matrix,
-    v: Matrix,
     allocator: std.mem.Allocator,
+    /// First moment estimate (momentum)
+    m: Matrix,
+    /// Second moment estimate (RMSprop)
+    v: Matrix,
+    /// Time step counter for bias correction
+    timestep: usize = 0,
+    /// Exponential decay rate for first moment
+    beta1: f32 = 0.9,
+    /// Exponential decay rate for second moment
+    beta2: f32 = 0.999,
+    /// Small constant for numerical stability
+    epsilon: f32 = 1e-8,
 
     clip_threshold: f32 = 1.0,
 
@@ -17,6 +47,15 @@ pub const Adam = struct {
     grad_accumulator: Matrix,
     accumulation_counter: usize = 0,
 
+    /// Initialize Adam optimizer for a parameter matrix.
+    ///
+    /// Parameters:
+    ///   allocator: Memory allocator
+    ///   rows: Number of rows in parameter matrix
+    ///   cols: Number of columns in parameter matrix
+    ///
+    /// Returns:
+    ///   Initialized Adam optimizer with zero moments
     pub fn init(allocator: std.mem.Allocator, rows: usize, cols: usize) !Adam {
         return Adam{
             .m = try Matrix.initZeros(allocator, rows, cols),

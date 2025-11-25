@@ -1,11 +1,20 @@
+//! Learning Rate Scheduler.
+//!
+//! Adjusts the learning rate during training according to a specified schedule.
+//! Supports constant, linear decay, and cosine annealing schedules.
+
 const std = @import("std");
 
+/// Type of learning rate schedule.
 pub const SchedulerType = enum {
     constant,
     linear_decay,
     cosine_annealing,
 };
 
+/// Learning rate scheduler.
+///
+/// Manages the learning rate over the course of training steps.
 pub const LRScheduler = struct {
     scheduler_type: SchedulerType,
     initial_lr: f32,
@@ -13,6 +22,7 @@ pub const LRScheduler = struct {
     total_steps: usize,
     current_step: usize,
 
+    /// Initialize a new learning rate scheduler.
     pub fn init(scheduler_type: SchedulerType, initial_lr: f32, total_steps: usize) LRScheduler {
         return LRScheduler{
             .scheduler_type = scheduler_type,

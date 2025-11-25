@@ -1,3 +1,21 @@
+//! Position-wise Feed-Forward Network (FFN).
+//!
+//! The FFN applies two linear transformations with a ReLU activation in between,
+//! processing each position of the sequence independently and identically.
+//!
+//! Mathematical formulation:
+//!   FFN(x) = max(0, xW₁ + b₁)W₂ + b₂
+//!   Output = Input + FFN(LayerNorm(Input))  (with residual connection)
+//!
+//! where:
+//!   - W₁ ∈ ℝ^(d_model × d_ff) is the first weight matrix
+//!   - W₂ ∈ ℝ^(d_ff × d_model) is the second weight matrix
+//!   - b₁, b₂ are bias vectors
+//!   - d_ff is typically 4 × d_model
+//!
+//! References:
+//! - "Attention Is All You Need" (Vaswani et al., 2017)
+
 const std = @import("std");
 const lib = @import("../lib.zig");
 const linalg = lib.linalg;
@@ -5,12 +23,16 @@ const Matrix = linalg.Matrix;
 const Adam = lib.optimizer.Adam;
 const layer = lib.layer;
 
+/// Position-wise Feed-Forward Network.
+///
+/// Applies two linear transformations with ReLU activation, followed by
+/// a residual connection. Each position is processed independently.
 pub const FeedForward = struct {
     allocator: std.mem.Allocator,
-    w1: Matrix,
-    b1: Matrix,
-    w2: Matrix,
-    b2: Matrix,
+    w1: Matrix, // First layer weights: embedding_dim → hidden_dim
+    b1: Matrix, // First layer bias
+    w2: Matrix, // Second layer weights: hidden_dim → embedding_dim
+    b2: Matrix, // Second layer bias
 
     has_cache: bool,
     cached_input: Matrix,

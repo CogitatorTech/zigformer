@@ -1,3 +1,16 @@
+//! Transformer block.
+//!
+//! TransformerBlock consists of:
+//!   1. Multi-head self-attention with residual connection and layer norm
+//!   2. Position-wise feed-forward network with residual connection and layer norm
+//!
+//! Architecture (Pre-LN variant):
+//!  - x' = x + SelfAttention(LayerNorm(x))
+//!  - y = x' + FeedForward(LayerNorm(x'))
+//!
+//! References:
+//!  - "Attention Is All You Need" (Vaswani et al., 2017)
+
 const std = @import("std");
 const lib = @import("../lib.zig");
 const layer = lib.layer;
@@ -6,12 +19,17 @@ const FeedForward = lib.feed_forward.FeedForward;
 const LayerNorm = lib.layer_norm.LayerNorm;
 const Matrix = lib.linalg.Matrix;
 
+/// Transformer block.
+///
+/// Processes sequences through attention (for capturing dependencies)
+/// and feed-forward layers (for non-linear transformations), with
+/// residual connections and layer normalization for training stability.
 pub const TransformerBlock = struct {
     allocator: std.mem.Allocator,
-    attention: *SelfAttention,
-    feed_forward: *FeedForward,
-    norm1: *LayerNorm,
-    norm2: *LayerNorm,
+    attention: *SelfAttention, // Multi-head self-attention layer
+    feed_forward: *FeedForward, // Position-wise FFN
+    norm1: *LayerNorm, // Layer norm after attention
+    norm2: *LayerNorm, // Layer norm after feed-forward
 
     pub fn init(allocator: std.mem.Allocator, embedding_dim: usize, hidden_dim: usize) !*TransformerBlock {
         const self = try allocator.create(TransformerBlock);

@@ -1,3 +1,23 @@
+//! Layer Normalization.
+//!
+//! Layer normalization normalizes inputs across the feature dimension,
+//! computing mean and variance for each example in a mini-batch.
+//!
+//! Mathematical formulation:
+//!  - μ = (1/d) Σ x_i            (mean)
+//!  - σ² = (1/d) Σ (x_i - μ)²    (variance)
+//!  - x̂ = (x - μ) / sqrt(σ² + ε) (normalize)
+//!  - y = γ ⊙ x̂ + β              (scale and shift)
+//!
+//! where:
+//!  - x ∈ ℝ^d is the input
+//!  - γ, β ∈ ℝ^d are learnable parameters (scale and shift)
+//!  - ε is a small constant for numerical stability
+//!  - ⊙ denotes element-wise multiplication
+//!
+//! References:
+//!  - "Layer Normalization" (Ba et al., 2016)
+
 const std = @import("std");
 const lib = @import("../lib.zig");
 const linalg = lib.linalg;
@@ -5,27 +25,40 @@ const Matrix = linalg.Matrix;
 const Adam = lib.optimizer.Adam;
 const layer = lib.layer;
 
+/// Layer Normalization module.
+///
+/// Normalizes activations across the feature dimension (last dimension),
+/// which helps with training stability and convergence speed. Unlike
+///  batch normalization, layer norm is independent across batches.
 pub const LayerNorm = struct {
     allocator: std.mem.Allocator,
-    gamma: Matrix,
-    beta: Matrix,
+    gamma: Matrix, // Scale parameter (γ), initialized to 1
+    beta: Matrix, // Shift parameter (β), initialized to 0
     optimizer_gamma: Adam,
     optimizer_beta: Adam,
     has_cache: bool,
     cached_input: Matrix,
-    cached_mean: Matrix,
-    cached_inv_std_dev: Matrix,
-    epsilon: f32 = 1e-5,
+    cached_mean: Matrix, // Mean for each sample
+    cached_inv_std_dev: Matrix, // Inverse standard deviation for each sample
+    epsilon: f32 = 1e-5, // Small constant for numerical stability
 
+    /// Initialize a layer normalization module.
+    ///
+    /// Parameters:
+    ///   allocator: Memory allocator
+    ///   feature_dim: Dimension of features to normalize
+    ///
+    /// Returns:
+    ///   Initialized LayerNorm struct
     pub fn init(allocator: std.mem.Allocator, feature_dim: usize) !*LayerNorm {
         const self = try allocator.create(LayerNorm);
         const gamma = try Matrix.init(allocator, 1, feature_dim);
-        for (gamma.data) |*g| g.* = 1.0;
+        for (gamma.data) |*g| g.* = 1.0; // Initialize scale to 1
 
         self.* = .{
             .allocator = allocator,
             .gamma = gamma,
-            .beta = try Matrix.initZeros(allocator, 1, feature_dim),
+            .beta = try Matrix.initZeros(allocator, 1, feature_dim), // Initialize shift to 0
             .optimizer_gamma = try Adam.init(allocator, 1, feature_dim),
             .optimizer_beta = try Adam.init(allocator, 1, feature_dim),
             .has_cache = false,
@@ -36,6 +69,7 @@ pub const LayerNorm = struct {
         return self;
     }
 
+    /// Deallocate all resources used by this layer norm module.
     pub fn deinit(self: *LayerNorm) void {
         self.gamma.deinit();
         self.beta.deinit();
@@ -49,6 +83,19 @@ pub const LayerNorm = struct {
         self.allocator.destroy(self);
     }
 
+    /// Compute layer normalization forward pass.
+    ///
+    /// For each row (sample) in the input:
+    ///   1. Compute mean: μ = (1/d) Σ x_i
+    ///   2. Compute variance: σ² = (1/d) Σ (x_i - μ)²
+    ///   3. Normalize: x̂_i = (x_i - μ) / sqrt(σ² + ε)
+    ///   4. Scale and shift: y_i = γ_i * x̂_i + β_i
+    ///
+    /// Parameters:
+    ///   input: Input tensor of shape (batch, features)
+    ///
+    /// Returns:
+    ///   Normalized output of same shape as input
     pub fn forward(self: *LayerNorm, input: Matrix) !Matrix {
         if (self.has_cache) {
             self.cached_input.deinit();

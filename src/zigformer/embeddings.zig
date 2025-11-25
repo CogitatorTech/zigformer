@@ -1,3 +1,22 @@
+//! Token and Positional Embeddings.
+//!
+//! Converts discrete token IDs into dense vector representations and adds
+//! positional information to capture sequence order.
+//!
+//! Mathematical formulation:
+//!   embedding(x) = TokenEmbedding(x) + PositionalEmbedding(pos)
+//!
+//! where:
+//!   - TokenEmbedding: lookup table mapping token IDs to vectors
+//!   - PositionalEmbedding: learned or fixed positional encodings
+//!   - x is a token ID, pos is the position in the sequence
+//!
+//! The output is a dense representation that combines semantic (token)
+//! and syntactic (position) information.
+//!
+//! References:
+//! - "Attention Is All You Need" (Vaswani et al., 2017)
+
 const std = @import("std");
 const lib = @import("../lib.zig");
 const linalg = lib.linalg;
@@ -5,10 +24,14 @@ const Matrix = linalg.Matrix;
 const Adam = lib.optimizer.Adam;
 const layer = lib.layer;
 
+/// Token and positional embedding layer.
+///
+/// Converts token IDs to dense vectors and adds positional information.
+/// This is typically the first layer of a transformer model.
 pub const Embeddings = struct {
     allocator: std.mem.Allocator,
-    token_embeddings: Matrix,
-    positional_embeddings: Matrix,
+    token_embeddings: Matrix, // Lookup table: vocab_size × embedding_dim
+    positional_embeddings: Matrix, // Position encodings: max_seq_len × embedding_dim
     has_cached_input: bool,
     cached_input: Matrix,
     token_optimizer: Adam,

@@ -1,3 +1,17 @@
+//! Output projection layer.
+//!
+//! Maps the final hidden states from the transformer to vocabulary logits,
+//! producing a probability distribution over the vocabulary for next-token prediction.
+//!
+//! Mathematical formulation:
+//!  - logits = xW^O + b
+//!  - probabilities = softmax(logits)
+//!
+//! where:
+//!  - x ∈ ℝ^(batch × d_model) is the final hidden state
+//!  - W^O ∈ ℝ^(d_model × vocab_size) is the output weight matrix
+//!  - b ∈ ℝ^vocab_size is the bias vector
+
 const std = @import("std");
 const lib = @import("../lib.zig");
 const linalg = lib.linalg;
@@ -5,10 +19,14 @@ const Matrix = linalg.Matrix;
 const Adam = lib.optimizer.Adam;
 const layer = lib.layer;
 
+/// Output projection layer.
+///
+/// Projects hidden states to vocabulary size for language modeling.
+/// The final softmax is typically applied externally during loss computation.
 pub const OutputProjection = struct {
     allocator: std.mem.Allocator,
-    w_out: Matrix,
-    b_out: Matrix,
+    w_out: Matrix, // Output weight matrix: embedding_dim × vocab_size
+    b_out: Matrix, // Output bias: 1 × vocab_size
     optimizer_w: Adam,
     optimizer_b: Adam,
     has_cached_input: bool,
