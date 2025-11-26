@@ -21,8 +21,8 @@ An educational transformer-based LLM in pure Zig
 ZigFormer is a fully functional implementation of a transformer-based large language model (LLM) written in Zig
 programming language.
 It aims to provide a clean, easy-to-understand LLM implementation with no large dependencies like PyTorch or TensorFlow.
-ZigFormer was mainly made for learning how a conventional transformer-based LLM works under the hood.
-It's inspired by Andrej Karpathy's [nanoGPT](https://github.com/karpathy/nanoGPT)
+ZigFormer was mainly made for learning how a conventional transformer-based LLM works under the hood and is
+inspired by Andrej Karpathy's [nanoGPT](https://github.com/karpathy/nanoGPT)
 and [nanochat](https://github.com/karpathy/nanochat) projects.
 
 ### Features
@@ -66,7 +66,7 @@ zig build run -- --save-model model.bin
 This will:
 
 1. Load the training datasets from `datasets/simple_dataset/`
-2. First, build a vocabulary of tokens from the data
+2. Build a vocabulary of tokens from the data
 3. Pre-train the model on the pretraining examples (raw text)
 4. Fine-tune the model on the instruction-following examples (question-answer pairs)
 5. Save the trained model to `model.bin`
@@ -74,7 +74,6 @@ This will:
 Training parameters can be given through a configuration file or CLI arguments.
 
 ```bash
-# Example using a configuration file for training
 zig build run -- --config my_config.json
 ```
 
@@ -103,7 +102,7 @@ You can run the web-based UI to chat with the trained model:
 zig build run-gui -- --load-model model.bin
 ```
 
-The UI can be accessed at `http://localhost:8085` by default.
+The UI can be accessed at http://localhost:8085 by default.
 
 You can also provide a configuration file for the UI:
 
@@ -128,10 +127,9 @@ zig build run-gui -- --config gui_config.json
 
 #### Available Options (CLI and Web UI)
 
-View all available options for the CLI and web-based UI:
-
 ```bash
 zig build run -- --help
+zig build run -- predict --help
 zig build run-gui -- --help
 ```
 

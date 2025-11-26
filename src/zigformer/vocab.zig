@@ -42,11 +42,32 @@ pub const Vocab = struct {
     }
 
     pub fn build(self: *Vocab, word_list: []const []const u8) !void {
+        std.debug.assert(self.words.items.len == 0);
+        self.owns_words = true;
+
+        var built: usize = 0;
+        errdefer {
+            for (self.words.items[0..built]) |word| {
+                self.allocator.free(word);
+            }
+            self.words.clearRetainingCapacity();
+            self.encode_map.clearRetainingCapacity();
+            self.decode_map.clearRetainingCapacity();
+            self.owns_words = false;
+        }
+
         for (word_list, 0..) |word, i| {
             const token_id: u32 = @truncate(i);
-            try self.encode_map.put(word, token_id);
-            try self.decode_map.put(token_id, word);
-            try self.words.append(self.allocator, word);
+            const owned_word = try self.allocator.dupe(u8, word);
+            var keep_word = false;
+            defer if (!keep_word) self.allocator.free(owned_word);
+
+            try self.encode_map.put(owned_word, token_id);
+            try self.decode_map.put(token_id, owned_word);
+            try self.words.append(self.allocator, owned_word);
+
+            keep_word = true;
+            built += 1;
         }
     }
 
@@ -97,6 +118,7 @@ pub const Vocab = struct {
         }
 
         try vocab.build(word_list.items);
+        for (word_list.items) |w| allocator.free(w);
         vocab.owns_words = true; // We allocated these words, so we own them
         return vocab;
     }

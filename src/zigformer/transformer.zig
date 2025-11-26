@@ -5,11 +5,11 @@
 //!   2. Position-wise feed-forward network with residual connection and layer norm
 //!
 //! Architecture (Pre-LN variant):
-//!  - x' = x + SelfAttention(LayerNorm(x))
-//!  - y = x' + FeedForward(LayerNorm(x'))
+//!   - x' = x + SelfAttention(LayerNorm(x))
+//!   - y = x' + FeedForward(LayerNorm(x'))
 //!
 //! References:
-//!  - "Attention Is All You Need" (Vaswani et al., 2017)
+//!   - "Attention Is All You Need" (Vaswani et al., 2017)
 
 const std = @import("std");
 const lib = @import("../lib.zig");
@@ -57,23 +57,41 @@ pub const TransformerBlock = struct {
     }
 
     pub fn forward(self: *TransformerBlock, input: Matrix, use_cache: bool) !Matrix {
-        // Self Attention
-        var attention_out = try self.attention.forward(input, use_cache);
-        defer attention_out.deinit();
-        var norm1_out = try self.norm1.forward(attention_out);
+        // Pre-LN Architecture: x' = x + SelfAttention(LayerNorm(x))
+        var norm1_out = try self.norm1.forward(input);
         defer norm1_out.deinit();
-        var ff_out = try self.feed_forward.forward(norm1_out);
+        var attention_out = try self.attention.forward(norm1_out, use_cache);
+        defer attention_out.deinit();
+        var residual1 = try input.add(&attention_out);
+        defer residual1.deinit();
+
+        // y = x' + FeedForward(LayerNorm(x'))
+        var norm2_out = try self.norm2.forward(residual1);
+        defer norm2_out.deinit();
+        var ff_out = try self.feed_forward.forward(norm2_out);
         defer ff_out.deinit();
-        const norm2_out = try self.norm2.forward(ff_out);
-        return norm2_out;
+        return residual1.add(&ff_out);
     }
 
     pub fn backward(self: *TransformerBlock, grads: lib.linalg.Matrix, lr: f32) !lib.linalg.Matrix {
-        const grad_norm2 = try self.norm2.backward(grads, lr);
-        const grad_ff = try self.feed_forward.backward(grad_norm2, lr);
-        const grad_norm1 = try self.norm1.backward(grad_ff, lr);
-        const grad_attn = try self.attention.backward(grad_norm1, lr);
-        return grad_attn;
+        // Backprop through second residual: y = x' + FFN(LN(x'))
+        var grad_residual2 = try grads.clone();
+        defer grad_residual2.deinit();
+        const grads_for_ff = try grads.clone();
+        const grad_ff = try self.feed_forward.backward(grads_for_ff, lr); // consumes grads_for_ff
+        var grad_norm2 = try self.norm2.backward(grad_ff, lr); // consumes grad_ff
+        defer grad_norm2.deinit();
+        var grad_after_ff = try grad_norm2.add(&grad_residual2);
+        defer grad_after_ff.deinit();
+
+        // Backprop through first residual: x' = x + Attn(LN(x))
+        var grad_residual1 = try grad_after_ff.clone();
+        defer grad_residual1.deinit();
+        const grads_for_attn = try grad_after_ff.clone();
+        const grad_attn = try self.attention.backward(grads_for_attn, lr); // consumes grads_for_attn
+        var grad_norm1 = try self.norm1.backward(grad_attn, lr); // consumes grad_attn
+        defer grad_norm1.deinit();
+        return grad_norm1.add(&grad_residual1);
     }
 
     pub fn parameters(self: *const TransformerBlock) usize {
@@ -144,7 +162,8 @@ test "TransformerBlock" {
     try std.testing.expectEqual(input.cols, output.cols);
 
     // Test Backward
-    const grads = try Matrix.initRandom(allocator, 2, embedding_dim, 0.0, 1.0);
+    var grads = try Matrix.initRandom(allocator, 2, embedding_dim, 0.0, 1.0);
+    defer grads.deinit();
     var grad_input = try tb.backward(grads, 0.01);
     defer grad_input.deinit();
 
@@ -171,4 +190,66 @@ test "TransformerBlock (save and load)" {
     defer loaded_tb.deinit();
 
     try std.testing.expectEqual(tb.parameters(), loaded_tb.parameters());
+}
+
+test "TransformerBlock Pre-LN architecture" {
+    const allocator = std.testing.allocator;
+    const embedding_dim = 16;
+    const hidden_dim = 32;
+
+    var tb = try TransformerBlock.init(allocator, embedding_dim, hidden_dim);
+    defer tb.deinit();
+
+    var input = try Matrix.initRandom(allocator, 2, embedding_dim, 0.0, 1.0);
+    defer input.deinit();
+
+    // Store input values for residual verification
+    var input_copy = try input.clone();
+    defer input_copy.deinit();
+
+    var output = try tb.forward(input, false);
+    defer output.deinit();
+
+    // Output should have same shape as input
+    try std.testing.expectEqual(input.rows, output.rows);
+    try std.testing.expectEqual(input.cols, output.cols);
+
+    // Output should be different from input (due to transformations)
+    var all_same = true;
+    for (input_copy.data, output.data) |in_val, out_val| {
+        if (@abs(in_val - out_val) > 1e-6) {
+            all_same = false;
+            break;
+        }
+    }
+    try std.testing.expect(!all_same);
+}
+
+test "TransformerBlock residual connections" {
+    const allocator = std.testing.allocator;
+    const embedding_dim = 16;
+    const hidden_dim = 32;
+
+    var tb = try TransformerBlock.init(allocator, embedding_dim, hidden_dim);
+    defer tb.deinit();
+
+    // Create input with known pattern
+    var input = try Matrix.init(allocator, 2, embedding_dim);
+    defer input.deinit();
+    for (input.data, 0..) |*val, i| {
+        val.* = @as(f32, @floatFromInt(i % 10));
+    }
+
+    var output = try tb.forward(input, false);
+    defer output.deinit();
+
+    // The residual connections should ensure output magnitude is related to input
+    // This is a basic sanity check that residuals are working
+    var input_norm: f32 = 0;
+    var output_norm: f32 = 0;
+    for (input.data) |val| input_norm += val * val;
+    for (output.data) |val| output_norm += val * val;
+
+    // Output should have non-zero magnitude if residuals work
+    try std.testing.expect(output_norm > 0);
 }

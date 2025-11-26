@@ -79,6 +79,7 @@ fn validateConfig(config: Config) void {
 }
 fn splitText(text: []const u8, allocator: std.mem.Allocator) !std.ArrayList([]const u8) {
     var list = std.ArrayList([]const u8){};
+    errdefer list.deinit(allocator);
     var it = std.mem.splitScalar(u8, text, ' ');
     while (it.next()) |word| {
         try list.append(allocator, word);
@@ -272,7 +273,7 @@ fn execRoot(ctx: chilli.CommandContext) !void {
     // Since we can't easily do that, let's prioritize CLI flags ONLY if they are explicitly different from our hardcoded defaults?
     // Or simpler: If --config is passed, we use it. We can manually parse args to see if flags are present, but that's messy.
 
-    // Let's stick to the plan: Config file sets values. CLI flags are read.
+    // Let's stick to the plan: Config file sets values. CLI flags override.
     // If we want CLI to override, we need to know if user typed it.
     // Given the constraints, let's do this:
     // If --config is present, use it.
@@ -319,17 +320,25 @@ fn execPredict(ctx: chilli.CommandContext) !void {
     const pretrain_path = try ctx.getFlag("pretrain", []const u8);
     const chat_path = try ctx.getFlag("train", []const u8);
     const prompt = try ctx.getFlag("prompt", []const u8);
+    const load_model_path = try ctx.getFlag("load-model", []const u8);
     const beam_width: usize = @intCast(try ctx.getFlag("beam-width", i64));
 
-    var pretrain = try readJsonLines(allocator, pretrain_path);
-    defer pretrain.deinit(allocator);
-    var chat = try readJsonLines(allocator, chat_path);
-    defer chat.deinit(allocator);
+    var model = if (load_model_path.len > 0) blk: {
+        break :blk try llm.LLM.load(allocator, load_model_path);
+    } else blk: {
+        var pretrain = try readJsonLines(allocator, pretrain_path);
+        defer pretrain.deinit(allocator);
+        var chat = try readJsonLines(allocator, chat_path);
+        defer chat.deinit(allocator);
 
-    var v = try buildVocabFromDatasets(allocator, pretrain.parsed.value, chat.parsed.value);
-    defer v.deinit();
+        var v = try buildVocabFromDatasets(allocator, pretrain.parsed.value, chat.parsed.value);
+        var vocab_owned_by_model = false;
+        defer if (!vocab_owned_by_model) v.deinit();
 
-    var model = try llm.LLM.init(allocator, v);
+        const new_model = try llm.LLM.init(allocator, v);
+        vocab_owned_by_model = true;
+        break :blk new_model;
+    };
     defer model.deinit();
 
     const formatted_input = try std.fmt.allocPrint(allocator, "User: {s}", .{prompt});
@@ -452,13 +461,13 @@ pub fn main() anyerror!void {
     });
     try predict_cmd.addFlag(.{
         .name = "pretrain",
-        .description = "Path to pretraining dataset (used to build vocab)",
+        .description = "Path to pretraining dataset (used to build vocabulary)",
         .type = .String,
         .default_value = .{ .String = "datasets/simple_dataset/pretrain.json" },
     });
     try predict_cmd.addFlag(.{
         .name = "train",
-        .description = "Path to training dataset (used to build vocab)",
+        .description = "Path to training dataset (used to build vocabulary)",
         .type = .String,
         .default_value = .{ .String = "datasets/simple_dataset/train.json" },
     });

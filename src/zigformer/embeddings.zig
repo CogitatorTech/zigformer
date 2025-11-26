@@ -71,7 +71,7 @@ pub const Embeddings = struct {
         self.cached_input = try input.clone();
         self.has_cached_input = true;
 
-        const total_tokens = input.cols;
+        const total_tokens = input.rows * input.cols;
         if (total_tokens % self.batch_size != 0) return error.InputSizeMismatch;
         const seq_len = total_tokens / self.batch_size;
 

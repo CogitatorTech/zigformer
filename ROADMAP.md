@@ -40,7 +40,7 @@ This document outlines the features implemented in ZigFormer and the future goal
 - [x] SIMD optimizations
 - [x] Model loading from a checkpoint
 - [x] Configuration file
-- [x] Better error handling and validation
+- [x] Improved error handling and validation
 
 ### GUI
 
@@ -48,4 +48,4 @@ This document outlines the features implemented in ZigFormer and the future goal
 - [x] Web interface
 - [x] Model loading from a checkpoint
 - [x] Configuration file
-- [x] Better error handling and validation
+- [x] Improved error handling and validation

@@ -113,9 +113,7 @@ pub const FeedForward = struct {
 
         var output = try self.cached_hidden_post.dot(&self.w2);
         addBias(&output, &self.b2);
-        const final_output = try output.add(&input);
-        output.deinit();
-        return final_output;
+        return output;
     }
 
     pub fn backward(self: *FeedForward, grads: Matrix, lr: f32) !Matrix {
@@ -161,10 +159,7 @@ pub const FeedForward = struct {
 
         var w1_t = try self.w1.transpose();
         defer w1_t.deinit();
-        var grad_input_ff = try grad_hidden_post.dot(&w1_t);
-        defer grad_input_ff.deinit();
-
-        const grad_input = try grad_input_ff.add(&mut_grads);
+        const grad_input = try grad_hidden_post.dot(&w1_t);
 
         self.optimizer_w2.step(&self.w2, final_grad_w2, lr);
         self.optimizer_b2.step(&self.b2, grad_b2, lr);

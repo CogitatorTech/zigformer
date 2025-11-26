@@ -75,27 +75,27 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-linux-gnu
-            artifact_name: elz-repl-linux-x86_64.zip
+            artifact_name: zigformer-cli-linux-x86_64.zip
             asset_content_type: application/zip
           - os: ubuntu-latest
             target: aarch64-linux-gnu
-            artifact_name: elz-repl-linux-aarch64.zip
+            artifact_name: zigformer-cli-linux-aarch64.zip
             asset_content_type: application/zip
           - os: macos-latest
             target: aarch64-macos # Apple Silicon (ARM64)
-            artifact_name: elz-repl-macos-aarch64.zip
+            artifact_name: zigformer-cli-macos-aarch64.zip
             asset_content_type: application/zip
           - os: macos-latest
             target: x86_64-macos # Intel
-            artifact_name: elz-repl-macos-x86_64.zip
+            artifact_name: zigformer-cli-macos-x86_64.zip
             asset_content_type: application/zip
           - os: windows-latest
             target: x86_64-windows-msvc
-            artifact_name: elz-repl-windows-x86_64.zip
+            artifact_name: zigformer-cli-windows-x86_64.zip
             asset_content_type: application/zip
           - os: windows-latest
             target: aarch64-windows-msvc
-            artifact_name: elz-repl-windows-aarch64.zip
+            artifact_name: zigformer-cli-windows-aarch64.zip
             asset_content_type: application/zip
 
     steps:
@@ -115,8 +115,8 @@ jobs:
       - name: Verify built binary exists (Unix)
         if: runner.os != 'Windows'
         run: |
-          if [ ! -f zig-out/bin/elz-repl ]; then
-            echo "ERROR: built binary zig-out/bin/elz-repl not found"
+          if [ ! -f zig-out/bin/zigformer-cli ]; then
+            echo "ERROR: built binary zig-out/bin/zigformer-cli not found"
             ls -l zig-out/bin || true
             exit 1
           fi
@@ -124,8 +124,8 @@ jobs:
       - name: Verify built binary exists (Windows)
         if: runner.os == 'Windows'
         run: |
-          if (!(Test-Path "zig-out\\bin\\elz-repl.exe")) {
-            Write-Host 'ERROR: built binary zig-out\\bin\\elz-repl.exe not found'
+          if (!(Test-Path "zig-out\\bin\\zigformer-cli.exe")) {
+            Write-Host 'ERROR: built binary zig-out\\bin\\zigformer-cli.exe not found'
             dir zig-out\\bin
             exit 1
           }
@@ -135,7 +135,7 @@ jobs:
         run: |
           RELEASE_DIR="release-${{ matrix.target }}-${{ github.run_id }}"
           mkdir -p "$RELEASE_DIR"
-          mv zig-out/bin/elz-repl "$RELEASE_DIR"/
+          mv zig-out/bin/zigformer-cli "$RELEASE_DIR"/
           # Create a zip of the release contents (avoid nesting an extra top-level directory)
           (cd "$RELEASE_DIR" && zip -r "../${{ matrix.artifact_name }}" .)
 
@@ -144,7 +144,7 @@ jobs:
         run: |
           $env:RELEASE_DIR = "release-${{ matrix.target }}-${{ github.run_id }}"
           New-Item -ItemType Directory -Path $env:RELEASE_DIR -Force | Out-Null
-          Move-Item zig-out\bin\elz-repl.exe $env:RELEASE_DIR\
+          Move-Item zig-out\bin\zigformer-cli.exe $env:RELEASE_DIR\
           Compress-Archive -Path "$env:RELEASE_DIR\*" -DestinationPath ${{ matrix.artifact_name }}
 
       - name: Upload Release Asset

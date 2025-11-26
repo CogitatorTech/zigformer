@@ -74,24 +74,28 @@ pub const Adam = struct {
     pub fn step(self: *Adam, params: *Matrix, grads: Matrix, lr: f32) void {
         self.timestep += 1;
 
+        // Clone gradients to avoid mutating input
+        var clipped_grads = grads.clone() catch unreachable;
+        defer clipped_grads.deinit();
+
         // Gradient Clipping
         var sum_sq: f32 = 0.0;
-        for (grads.data) |g| {
+        for (clipped_grads.data) |g| {
             sum_sq += g * g;
         }
         const norm = std.math.sqrt(sum_sq);
         if (norm > self.clip_threshold) {
             const scale = self.clip_threshold / (norm + 1e-6);
-            for (grads.data) |*g| {
+            for (clipped_grads.data) |*g| {
                 g.* *= scale;
             }
         }
 
-        for (self.m.data, grads.data) |*m_val, g_val| {
+        for (self.m.data, clipped_grads.data) |*m_val, g_val| {
             m_val.* = self.beta1 * m_val.* + (1.0 - self.beta1) * g_val;
         }
 
-        for (self.v.data, grads.data) |*v_val, g_val| {
+        for (self.v.data, clipped_grads.data) |*v_val, g_val| {
             v_val.* = self.beta2 * v_val.* + (1.0 - self.beta2) * (g_val * g_val);
         }
 
@@ -124,24 +128,28 @@ pub const Adam = struct {
 
         self.timestep += 1;
 
+        // Clone accumulated gradients to avoid mutation
+        var clipped_grads = self.grad_accumulator.clone() catch unreachable;
+        defer clipped_grads.deinit();
+
         // Gradient Clipping on accumulated gradients
         var sum_sq: f32 = 0.0;
-        for (self.grad_accumulator.data) |g| {
+        for (clipped_grads.data) |g| {
             sum_sq += g * g;
         }
         const norm = std.math.sqrt(sum_sq);
         if (norm > self.clip_threshold) {
             const scale = self.clip_threshold / (norm + 1e-6);
-            for (self.grad_accumulator.data) |*g| {
+            for (clipped_grads.data) |*g| {
                 g.* *= scale;
             }
         }
 
-        for (self.m.data, self.grad_accumulator.data) |*m_val, g_val| {
+        for (self.m.data, clipped_grads.data) |*m_val, g_val| {
             m_val.* = self.beta1 * m_val.* + (1.0 - self.beta1) * g_val;
         }
 
-        for (self.v.data, self.grad_accumulator.data) |*v_val, g_val| {
+        for (self.v.data, clipped_grads.data) |*v_val, g_val| {
             v_val.* = self.beta2 * v_val.* + (1.0 - self.beta2) * (g_val * g_val);
         }
 
@@ -193,5 +201,34 @@ test "Adam step" {
 
     for (params.data, initial_params) |p, initial_p| {
         try std.testing.expect(p < initial_p);
+    }
+}
+
+test "Adam gradient immutability" {
+    const allocator = std.testing.allocator;
+    var adam = try Adam.init(allocator, 1, 4);
+    defer adam.deinit();
+
+    var params = try Matrix.init(allocator, 1, 4);
+    defer params.deinit();
+    for (params.data) |*p| p.* = 1.0;
+
+    var grads = try Matrix.init(allocator, 1, 4);
+    defer grads.deinit();
+    grads.data[0] = 10.0; // Large gradient to trigger clipping
+    grads.data[1] = 10.0;
+    grads.data[2] = 10.0;
+    grads.data[3] = 10.0;
+
+    // Store original gradient values
+    const original_grads = try allocator.alloc(f32, 4);
+    defer allocator.free(original_grads);
+    @memcpy(original_grads, grads.data);
+
+    adam.step(&params, grads, 0.001);
+
+    // Verify gradients were not mutated
+    for (grads.data, original_grads) |g, orig_g| {
+        try std.testing.expectEqual(orig_g, g);
     }
 }

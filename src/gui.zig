@@ -36,6 +36,7 @@ const ServerState = struct {
 
 fn splitText(text: []const u8, allocator: std.mem.Allocator) !std.ArrayList([]const u8) {
     var list = std.ArrayList([]const u8){};
+    errdefer list.deinit(allocator);
     var it = std.mem.splitScalar(u8, text, ' ');
     while (it.next()) |word| {
         try list.append(allocator, word);
@@ -395,13 +396,13 @@ pub fn main() !void {
     });
     try cmd.addFlag(.{
         .name = "pretrain",
-        .description = "Path to pretraining dataset (for vocab)",
+        .description = "Path to pretraining dataset (for vocabulary)",
         .type = .String,
         .default_value = .{ .String = "datasets/simple_dataset/pretrain.json" },
     });
     try cmd.addFlag(.{
         .name = "train",
-        .description = "Path to training dataset (for vocab)",
+        .description = "Path to training dataset (for vocabulary)",
         .type = .String,
         .default_value = .{ .String = "datasets/simple_dataset/train.json" },
     });

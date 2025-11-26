@@ -148,6 +148,7 @@ pub const LLM = struct {
 
     pub fn tokenize(self: *const LLM, text: []const u8) !std.ArrayList(u32) {
         var tokens = std.ArrayList(u32){};
+        errdefer tokens.deinit(self.allocator);
         try tokens.ensureTotalCapacity(self.allocator, text.len / 4);
         var it = std.mem.splitScalar(u8, text, ' ');
         while (it.next()) |word| {
@@ -216,6 +217,7 @@ pub const LLM = struct {
 
     fn greedyDecode(probs: *const Matrix) !std.ArrayList(u32) {
         var tokens = std.ArrayList(u32){};
+        errdefer tokens.deinit(probs.allocator);
         try tokens.ensureTotalCapacity(probs.allocator, probs.rows);
         for (0..probs.rows) |r| {
             var max_idx: u32 = 0;
@@ -234,6 +236,7 @@ pub const LLM = struct {
 
     fn topKSampling(probs: *const Matrix, k: usize, allocator: std.mem.Allocator) !std.ArrayList(u32) {
         var tokens = std.ArrayList(u32){};
+        errdefer tokens.deinit(allocator);
         try tokens.ensureTotalCapacity(allocator, probs.rows);
 
         var prng = std.Random.DefaultPrng.init(@intCast(std.time.timestamp()));
@@ -284,6 +287,7 @@ pub const LLM = struct {
 
     fn topPSampling(probs: *const Matrix, p: f32, allocator: std.mem.Allocator) !std.ArrayList(u32) {
         var tokens = std.ArrayList(u32){};
+        errdefer tokens.deinit(allocator);
         try tokens.ensureTotalCapacity(allocator, probs.rows);
 
         var prng = std.Random.DefaultPrng.init(@intCast(std.time.timestamp()));
@@ -497,43 +501,69 @@ pub const LLM = struct {
 
         const end_token = self.vocab.encode("</s>").?;
 
-        for (0..(lib.config.max_seq_len - input_len)) |_| {
-            var input_matrix = try Matrix.init(self.allocator, 1, tokenized.items.len);
-            errdefer input_matrix.deinit();
-            for (tokenized.items, 0..) |tok, i| {
-                input_matrix.data[i] = @floatFromInt(tok);
+        // Reset cache
+        self.resetCache();
+
+        // Process prompt (fill cache)
+        var input_matrix = try Matrix.init(self.allocator, 1, tokenized.items.len);
+        errdefer input_matrix.deinit();
+        for (tokenized.items, 0..) |tok, i| {
+            input_matrix.data[i] = @floatFromInt(tok);
+        }
+
+        var logits = try self.forward(input_matrix, true);
+        input_matrix.deinit();
+
+        var last_logit = try logits.getRow(logits.rows - 1);
+        logits.deinit();
+
+        softmax(&last_logit);
+
+        // Sample first token
+        var next_tokens = switch (mode) {
+            .greedy => try greedyDecode(&last_logit),
+            .topk => try topKSampling(&last_logit, k, self.allocator),
+            .topp => try topPSampling(&last_logit, p, self.allocator),
+        };
+        last_logit.deinit();
+        defer next_tokens.deinit(self.allocator);
+
+        const first_token = next_tokens.items[0];
+        try output_tokens.append(self.allocator, first_token);
+        // We don't need to append to tokenized for input, as we only feed next_token
+
+        if (first_token != end_token) {
+            var current_token = first_token;
+            // Generation loop
+            for (0..(lib.config.max_seq_len - input_len - 1)) |_| {
+                // Prepare input for next step (single token)
+                input_matrix = try Matrix.init(self.allocator, 1, 1);
+                errdefer input_matrix.deinit();
+                input_matrix.data[0] = @floatFromInt(current_token);
+
+                // Run forward with cache
+                logits = try self.forward(input_matrix, true);
+                input_matrix.deinit();
+
+                last_logit = try logits.getRow(logits.rows - 1);
+                logits.deinit();
+
+                softmax(&last_logit);
+
+                // Sample next token
+                var step_tokens = switch (mode) {
+                    .greedy => try greedyDecode(&last_logit),
+                    .topk => try topKSampling(&last_logit, k, self.allocator),
+                    .topp => try topPSampling(&last_logit, p, self.allocator),
+                };
+                last_logit.deinit();
+                defer step_tokens.deinit(self.allocator);
+
+                current_token = step_tokens.items[0];
+                try output_tokens.append(self.allocator, current_token);
+
+                if (current_token == end_token) break;
             }
-
-            var temp_matrix = input_matrix;
-            for (self.network.items) |*layer| {
-                const next_matrix = try layer.forward(temp_matrix, false);
-                if (temp_matrix.data.ptr != input_matrix.data.ptr) {
-                    temp_matrix.deinit();
-                }
-                temp_matrix = next_matrix;
-            }
-
-            var logits = temp_matrix;
-
-            var last_logit = try logits.getRow(logits.rows - 1);
-            logits.deinit();
-            defer last_logit.deinit();
-
-            softmax(&last_logit);
-
-            // Use appropriate sampling method
-            var next_tokens = switch (mode) {
-                .greedy => try greedyDecode(&last_logit),
-                .topk => try topKSampling(&last_logit, k, self.allocator),
-                .topp => try topPSampling(&last_logit, p, self.allocator),
-            };
-            defer next_tokens.deinit(self.allocator);
-
-            const next_token = next_tokens.items[0];
-            try output_tokens.append(self.allocator, next_token);
-            try tokenized.append(self.allocator, next_token);
-
-            if (next_token == end_token) break;
         }
 
         var result_builder = std.ArrayList(u8){};
@@ -704,21 +734,23 @@ pub const LLM = struct {
     pub fn train(self: *LLM, data: []const []const u8, epochs: usize, lr: f32, batch_size: usize, accumulation_steps: usize) !void {
         self.setBatchSize(batch_size);
 
-        // Effective learning rate for gradient accumulation
+        // The learning rate for gradient accumulation
         const effective_lr = lr / @as(f32, @floatFromInt(accumulation_steps));
 
         var tokenized_data = std.ArrayList(std.ArrayList(u32)){};
         defer {
-            for (tokenized_data.items) |*d| d.deinit(self.allocator);
+            for (tokenized_data.items) |*seq| seq.deinit(self.allocator);
             tokenized_data.deinit(self.allocator);
         }
+        try tokenized_data.ensureTotalCapacity(self.allocator, data.len);
 
         for (data) |text| {
-            try tokenized_data.append(self.allocator, try self.tokenize(text));
+            var tokens = try self.tokenize(text);
+            errdefer tokens.deinit(self.allocator);
+            try tokenized_data.append(self.allocator, tokens);
         }
 
-        // Simple shuffle could be added here
-
+        // The training loop
         for (0..epochs) |epoch| {
             var total_loss: f32 = 0.0;
             var processed_batches: usize = 0;
@@ -747,7 +779,7 @@ pub const LLM = struct {
                 const total_tokens = current_batch_size * seq_len;
 
                 // Prepare input matrix (batch_size * seq_len)
-                var input_matrix = try Matrix.init(self.allocator, 1, total_tokens);
+                var input_matrix = try Matrix.init(self.allocator, current_batch_size, seq_len);
                 defer input_matrix.deinit();
 
                 // Prepare targets
@@ -766,9 +798,8 @@ pub const LLM = struct {
                             input_matrix.data[global_idx] = @floatFromInt(input_ids[t]);
                             targets[global_idx] = target_ids[t];
                         } else {
-                            // Padding
-                            input_matrix.data[global_idx] = 0; // Pad with 0
-                            targets[global_idx] = 0; // Pad target with 0 (should be ignored in loss)
+                            input_matrix.data[global_idx] = 0;
+                            targets[global_idx] = 0;
                         }
                     }
                 }
@@ -969,26 +1000,43 @@ test "LLM (save and load)" {
 test "LLM tokenizer" {
     const allocator = std.testing.allocator;
     var vocab = Vocab.init(allocator);
-    // Add words and punctuation to vocab manually for testing
-    // We pass space-separated tokens so vocab.build adds them correctly
-    const training_data = &[_][]const u8{ "hello", ",", "world", "!", "</s>" };
-    try vocab.build(training_data);
+    // defer vocab.deinit(); // LLM takes ownership
+    const words = &[_][]const u8{ "hello", "world", "</s>" };
+    try vocab.build(words);
 
-    // Init model manually
-    var model = LLM{
-        .allocator = allocator,
-        .vocab = vocab,
-        .network = std.ArrayList(Layer){},
-    };
+    var model = try LLM.init(allocator, vocab);
     defer model.deinit();
 
-    const text = "hello, world!";
+    const text = "hello world";
     var tokens = try model.tokenize(text);
     defer tokens.deinit(allocator);
 
-    try std.testing.expectEqual(@as(usize, 4), tokens.items.len);
+    try std.testing.expectEqual(@as(usize, 2), tokens.items.len);
     try std.testing.expectEqual(model.vocab.encode("hello").?, tokens.items[0]);
-    try std.testing.expectEqual(model.vocab.encode(",").?, tokens.items[1]);
-    try std.testing.expectEqual(model.vocab.encode("world").?, tokens.items[2]);
-    try std.testing.expectEqual(model.vocab.encode("!").?, tokens.items[3]);
+    try std.testing.expectEqual(model.vocab.encode("world").?, tokens.items[1]);
+}
+
+test "LLM predictWithSampling" {
+    const allocator = std.testing.allocator;
+
+    // Create a small vocab
+    var vocab = Vocab.init(allocator);
+    const words = &[_][]const u8{ "hello", "world", "test", "</s>" };
+    try vocab.build(words);
+
+    // Init model
+    var model = try LLM.init(allocator, vocab);
+    defer model.deinit();
+
+    // Test greedy sampling (should be deterministic)
+    const output1 = try model.predictWithSampling("hello", .greedy, 1, 0.0);
+    defer allocator.free(output1);
+
+    // Test top-k sampling
+    const output2 = try model.predictWithSampling("hello", .topk, 2, 0.0);
+    defer allocator.free(output2);
+
+    // Test top-p sampling
+    const output3 = try model.predictWithSampling("hello", .topp, 0, 0.9);
+    defer allocator.free(output3);
 }

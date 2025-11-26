@@ -331,8 +331,8 @@ pub const SelfAttention = struct {
                 // Store scores
                 for (0..seq_len) |r| {
                     const global_r = batch_offset + r;
-                    const src_row = scores.data[r * seq_len .. (r + 1) * seq_len];
-                    const dst_row = self.cached_attention_scores.data[(h * total_rows + global_r) * seq_len .. (h * total_rows + global_r + 1) * seq_len];
+                    const src_row = scores.data[r * current_cache_len_val .. (r + 1) * current_cache_len_val];
+                    const dst_row = self.cached_attention_scores.data[(h * total_rows + global_r) * current_cache_len_val .. (h * total_rows + global_r + 1) * current_cache_len_val];
                     @memcpy(dst_row, src_row);
                 }
 
@@ -352,21 +352,12 @@ pub const SelfAttention = struct {
         }
 
         // Output projection
-        var output = try self.cached_context.dot(&self.w_o);
-
-        // Residual connection
-        const result = try output.add(&self.cached_input);
-        output.deinit();
-        return result;
+        return self.cached_context.dot(&self.w_o);
     }
 
     pub fn backward(self: *SelfAttention, grads: Matrix, lr: f32) !Matrix {
         var mut_grads = grads;
         defer mut_grads.deinit();
-
-        // Gradients for Residual connection
-        var grad_input_residual = try mut_grads.clone();
-        defer grad_input_residual.deinit();
 
         // Gradients through Output Projection
         var w_o_t = try self.w_o.transpose();
@@ -398,11 +389,14 @@ pub const SelfAttention = struct {
                 // Reconstruct Q_h, K_h, V_h, Scores_h for backward pass
                 var q_h = try Matrix.init(self.allocator, seq_len, self.head_dim);
                 defer q_h.deinit();
-                var k_h = try Matrix.init(self.allocator, seq_len, self.head_dim);
+
+                // K and V dimensions depend on whether caching was used
+                const kv_len = self.cached_k.rows / self.batch_size;
+                var k_h = try Matrix.init(self.allocator, kv_len, self.head_dim);
                 defer k_h.deinit();
-                var v_h = try Matrix.init(self.allocator, seq_len, self.head_dim);
+                var v_h = try Matrix.init(self.allocator, kv_len, self.head_dim);
                 defer v_h.deinit();
-                var scores_h = try Matrix.init(self.allocator, seq_len, seq_len);
+                var scores_h = try Matrix.init(self.allocator, seq_len, kv_len);
                 defer scores_h.deinit();
 
                 for (0..seq_len) |r| {
@@ -410,11 +404,17 @@ pub const SelfAttention = struct {
                     const start = h * self.head_dim;
                     const end = start + self.head_dim;
                     @memcpy(q_h.data[r * self.head_dim .. (r + 1) * self.head_dim], self.cached_q.data[global_r * self.embedding_dim + start .. global_r * self.embedding_dim + end]);
+
+                    const score_src = self.cached_attention_scores.data[(h * total_rows + global_r) * kv_len .. (h * total_rows + global_r + 1) * kv_len];
+                    @memcpy(scores_h.data[r * kv_len .. (r + 1) * kv_len], score_src);
+                }
+
+                for (0..kv_len) |r| {
+                    const global_r = batch_offset + r;
+                    const start = h * self.head_dim;
+                    const end = start + self.head_dim;
                     @memcpy(k_h.data[r * self.head_dim .. (r + 1) * self.head_dim], self.cached_k.data[global_r * self.embedding_dim + start .. global_r * self.embedding_dim + end]);
                     @memcpy(v_h.data[r * self.head_dim .. (r + 1) * self.head_dim], self.cached_v.data[global_r * self.embedding_dim + start .. global_r * self.embedding_dim + end]);
-
-                    const score_src = self.cached_attention_scores.data[(h * total_rows + global_r) * seq_len .. (h * total_rows + global_r + 1) * seq_len];
-                    @memcpy(scores_h.data[r * seq_len .. (r + 1) * seq_len], score_src);
                 }
 
                 // Extract grad_context for this head
@@ -441,8 +441,8 @@ pub const SelfAttention = struct {
 
                 // Backprop through Softmax
                 for (0..seq_len) |r| {
-                    const score_row = scores_h.data[r * seq_len .. (r + 1) * seq_len];
-                    const grad_row = grad_scores_h.data[r * seq_len .. (r + 1) * seq_len];
+                    const score_row = scores_h.data[r * kv_len .. (r + 1) * kv_len];
+                    const grad_row = grad_scores_h.data[r * kv_len .. (r + 1) * kv_len];
                     var dot_product: f32 = 0;
                     for (score_row, grad_row) |s, g| dot_product += s * g;
                     for (score_row, grad_row) |s, *g| g.* = s * (g.* - dot_product);
@@ -515,10 +515,8 @@ pub const SelfAttention = struct {
 
         var grad_input = try grad_input_q.add(&grad_input_k);
         defer grad_input.deinit();
-        var grad_input_sum = try grad_input.add(&grad_input_v);
-        defer grad_input_sum.deinit();
-
-        return grad_input_sum.add(&grad_input_residual);
+        const grad_input_sum = try grad_input.add(&grad_input_v);
+        return grad_input_sum;
     }
 
     pub fn parameters(self: *const SelfAttention) usize {
