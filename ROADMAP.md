@@ -41,3 +41,11 @@ This document outlines the features implemented in ZigFormer and the future goal
 - [x] Model loading from a checkpoint
 - [x] Configuration file
 - [x] Better error handling and validation
+
+### GUI
+
+- [x] Web server
+- [x] Web interface
+- [x] Model loading from a checkpoint
+- [x] Configuration file
+- [x] Better error handling and validation

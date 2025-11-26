@@ -43,6 +43,30 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(exe);
 
+    // Create the GUI executable
+    const gui_module = b.addModule("gui", .{
+        .root_source_file = b.path("src/gui.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    gui_module.addImport("zigformer", zigformer_mod);
+    gui_module.addImport("chilli", chilli_module);
+
+    const gui_exe = b.addExecutable(.{
+        .name = "zigformer-gui",
+        .root_module = gui_module,
+    });
+    b.installArtifact(gui_exe);
+
+    // Create a "run-gui" step
+    const run_gui_cmd = b.addRunArtifact(gui_exe);
+    run_gui_cmd.step.dependOn(b.getInstallStep());
+    if (b.args) |args| {
+        run_gui_cmd.addArgs(args);
+    }
+    const run_gui_step = b.step("run-gui", "Run the GUI application");
+    run_gui_step.dependOn(&run_gui_cmd.step);
+
     // Create a "run" step to execute the application.
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
