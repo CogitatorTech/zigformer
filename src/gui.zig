@@ -7,7 +7,7 @@ const vocab = zigformer.vocab;
 const index_html = @embedFile("gui/index.html");
 
 const Config = struct {
-    port: u16 = 8080,
+    port: u16 = 8085,
     host: []const u8 = "0.0.0.0",
     pretrain_path: []const u8 = "datasets/simple_dataset/pretrain.json",
     train_path: []const u8 = "datasets/simple_dataset/train.json",
@@ -276,13 +276,6 @@ fn runServer(allocator: std.mem.Allocator, config: Config) !void {
     // 1. Load Model
     std.debug.print("Loading model/vocab...\n", .{});
 
-    var pretrain = try readJsonLines(allocator, config.pretrain_path);
-    defer pretrain.deinit();
-    var chat = try readJsonLines(allocator, config.train_path);
-    defer chat.deinit();
-
-    const v = try buildVocabFromDatasets(allocator, pretrain.value, chat.value);
-
     var model: *llm.LLM = undefined;
 
     if (config.load_model_path) |path| {
@@ -290,6 +283,14 @@ fn runServer(allocator: std.mem.Allocator, config: Config) !void {
         model = try allocator.create(llm.LLM);
         model.* = try llm.LLM.load(allocator, path);
     } else {
+        // Only build vocab if we're creating a new model
+        var pretrain = try readJsonLines(allocator, config.pretrain_path);
+        defer pretrain.deinit();
+        var chat = try readJsonLines(allocator, config.train_path);
+        defer chat.deinit();
+
+        const v = try buildVocabFromDatasets(allocator, pretrain.value, chat.value);
+
         std.debug.print("Initializing new model (untrained)...\n", .{});
         model = try allocator.create(llm.LLM);
         model.* = try llm.LLM.init(allocator, v);
@@ -390,7 +391,7 @@ pub fn main() !void {
         .name = "port",
         .description = "Port to listen on",
         .type = .Int,
-        .default_value = .{ .Int = 8080 },
+        .default_value = .{ .Int = 8085 },
     });
     try cmd.addFlag(.{
         .name = "pretrain",

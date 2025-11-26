@@ -18,21 +18,12 @@ An educational transformer-based LLM in pure Zig
 
 ---
 
-ZigFormer is a fully functional implementation of a transformer-based large language model (LLM) written in pure Zig.
-It aims to provide a clean, easy-to-understand implementation of a modern LLM (similar to GPT-2) with no external ML frameworks.
-ZigFormer is mainly made for learning how a conventional transformer-based LLM works under the hood.
-
-### Motivation
-
-Most language model implementations rely on heavy frameworks like PyTorch or TensorFlow, which abstract away the core mechanics of how these models actually work.
-ZigFormer takes a different approach by implementing everything from scratch in Zig, making it ideal for:
-
-- **Learning**: Understanding transformer architecture by reading clean, well-documented code
-- **Experimentation**: Modifying and extending the model without framework constraints
-- **Performance**: Leveraging Zig's speed and control for efficient training and inference
-- **Transparency**: Seeing exactly how attention mechanisms, embeddings, and training loops work
-
-By building everything from the ground up using only basic linear algebra operations, ZigFormer demystifies the "magic" behind large language models.
+ZigFormer is a fully functional implementation of a transformer-based large language model (LLM) written in Zig
+programming language.
+It aims to provide a clean, easy-to-understand LLM implementation with no large dependencies like PyTorch or TensorFlow.
+ZigFormer was mainly made for learning how a conventional transformer-based LLM works under the hood.
+It's inspired by Andrej Karpathy's [nanoGPT](https://github.com/karpathy/nanoGPT)
+and [nanochat](https://github.com/karpathy/nanochat) projects.
 
 ### Features
 
@@ -112,7 +103,7 @@ You can run the web-based UI to chat with the trained model:
 zig build run-gui -- --load-model model.bin
 ```
 
-The UI can be accessed at `http://localhost:8080` by default.
+The UI can be accessed at `http://localhost:8085` by default.
 
 You can also provide a configuration file for the UI:
 
@@ -124,7 +115,7 @@ zig build run-gui -- --config gui_config.json
 
 ```json
 {
-    "port": 8080,
+    "port": 8085,
     "host": "0.0.0.0",
     "pretrain_path": "datasets/simple_dataset/pretrain.json",
     "train_path": "datasets/simple_dataset/train.json",
@@ -135,7 +126,7 @@ zig build run-gui -- --config gui_config.json
 }
 ```
 
-#### Viewing Help
+#### Available Options (CLI and Web UI)
 
 View all available options for the CLI and web-based UI:
 
@@ -150,37 +141,6 @@ zig build run-gui -- --help
 
 You can find the full API documentation for the latest release of
 ZigFormer [here](https://CogitatorTech.github.io/zigformer/).
-
-Alternatively, you can use the `zig build docs` command to generate the API documentation for the current version from
-the source code.
-This will generate HTML documentation in the `zig-out/docs/` directory.
-
-#### Configuration Reference
-
-**CLI Options:**
-
-- `pretrain_path` - Path to pretraining dataset (JSON array of strings)
-- `train_path` - Path to instruction-tuning dataset (JSON array of strings)
-- `pre_epochs` - Number of pretraining epochs (default: 10)
-- `chat_epochs` - Number of instruction-tuning epochs (default: 10)
-- `batch_size` - Training batch size (default: 32)
-- `accumulation_steps` - Gradient accumulation steps (default: 1)
-- `pre_lr` - Pretraining learning rate (default: 0.0005)
-- `chat_lr` - Instruction-tuning learning rate (default: 0.0001)
-- `save_model_path` - Path to save trained model
-- `load_model_path` - Path to load existing model
-- `interactive` - Enter interactive mode after training (default: true)
-
-**Web UI Options:**
-
-- `port` - Server port (default: 8080)
-- `host` - Bind address (default: "0.0.0.0")
-- `pretrain_path` - Path to pretraining dataset (for vocabulary building)
-- `train_path` - Path to training dataset (for vocabulary building)
-- `load_model_path` - Path to trained model checkpoint
-- `max_request_size` - Maximum request size in bytes (default: 1048576)
-- `max_prompt_length` - Maximum prompt length in characters (default: 1000)
-- `timeout_seconds` - Request timeout in seconds (default: 30)
 
 ---
 
