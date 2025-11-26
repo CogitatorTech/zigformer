@@ -87,7 +87,6 @@ pub const feed_forward = @import("zigformer/feed_forward.zig");
 pub const transformer = @import("zigformer/transformer.zig");
 pub const output_projection = @import("zigformer/output_projection.zig");
 pub const llm = @import("zigformer/llm.zig");
-
 test {
     std.testing.refAllDecls(@This());
 }

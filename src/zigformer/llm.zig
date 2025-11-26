@@ -146,13 +146,46 @@ pub const LLM = struct {
         return total;
     }
 
-    fn tokenize(self: *const LLM, text: []const u8) !std.ArrayList(u32) {
+    pub fn tokenize(self: *const LLM, text: []const u8) !std.ArrayList(u32) {
         var tokens = std.ArrayList(u32){};
         try tokens.ensureTotalCapacity(self.allocator, text.len / 4);
         var it = std.mem.splitScalar(u8, text, ' ');
         while (it.next()) |word| {
-            if (self.vocab.encode(word)) |token_id| {
-                try tokens.append(self.allocator, token_id);
+            // Special case for end token
+            if (std.mem.eql(u8, word, "</s>")) {
+                if (self.vocab.encode(word)) |token_id| {
+                    try tokens.append(self.allocator, token_id);
+                }
+                continue;
+            }
+
+            var start: usize = 0;
+            for (word, 0..) |c, i| {
+                if (std.ascii.isPrint(c) and !std.ascii.isAlphanumeric(c)) {
+                    // If we have a word before the punctuation, add it
+                    if (i > start) {
+                        const sub_word = word[start..i];
+                        if (self.vocab.encode(sub_word)) |token_id| {
+                            try tokens.append(self.allocator, token_id);
+                        }
+                    }
+
+                    // Add the punctuation as its own token
+                    const punct_slice = word[i .. i + 1];
+                    if (self.vocab.encode(punct_slice)) |token_id| {
+                        try tokens.append(self.allocator, token_id);
+                    }
+
+                    start = i + 1;
+                }
+            }
+
+            // Add any remaining word
+            if (start < word.len) {
+                const sub_word = word[start..];
+                if (self.vocab.encode(sub_word)) |token_id| {
+                    try tokens.append(self.allocator, token_id);
+                }
             }
         }
         return tokens;
@@ -931,4 +964,31 @@ test "LLM (save and load)" {
     defer allocator.free(output2);
 
     try std.testing.expectEqualStrings(output1, output2);
+}
+
+test "LLM tokenizer" {
+    const allocator = std.testing.allocator;
+    var vocab = Vocab.init(allocator);
+    // Add words and punctuation to vocab manually for testing
+    // We pass space-separated tokens so vocab.build adds them correctly
+    const training_data = &[_][]const u8{ "hello", ",", "world", "!", "</s>" };
+    try vocab.build(training_data);
+
+    // Init model manually
+    var model = LLM{
+        .allocator = allocator,
+        .vocab = vocab,
+        .network = std.ArrayList(Layer){},
+    };
+    defer model.deinit();
+
+    const text = "hello, world!";
+    var tokens = try model.tokenize(text);
+    defer tokens.deinit(allocator);
+
+    try std.testing.expectEqual(@as(usize, 4), tokens.items.len);
+    try std.testing.expectEqual(model.vocab.encode("hello").?, tokens.items[0]);
+    try std.testing.expectEqual(model.vocab.encode(",").?, tokens.items[1]);
+    try std.testing.expectEqual(model.vocab.encode("world").?, tokens.items[2]);
+    try std.testing.expectEqual(model.vocab.encode("!").?, tokens.items[3]);
 }

@@ -12,15 +12,27 @@
 [![Zig Version](https://img.shields.io/badge/Zig-0.15.2-orange?logo=zig&labelColor=282c34)](https://ziglang.org/download/)
 [![Release](https://img.shields.io/github/release/CogitatorTech/zigformer.svg?label=release&style=flat&labelColor=282c34&logo=github)](https://github.com/CogitatorTech/zigformer/releases/latest)
 
-An educational transformer-based LLM in Zig
+An educational transformer-based LLM in pure Zig
 
 </div>
 
 ---
 
-ZigFormer is a fully functional implementation of a transformer-based large language model (LLM) written in Zig
-programming language.
-I aim to be a clean and easy-to-underhand implementation of a modern LLM (like ChatGPT) in pure Zig code.
+ZigFormer is a fully functional implementation of a transformer-based large language model (LLM) written in pure Zig.
+It aims to provide a clean, easy-to-understand implementation of a modern LLM (similar to GPT-2) with no external ML frameworks.
+ZigFormer is mainly made for learning how a conventional transformer-based LLM works under the hood.
+
+### Motivation
+
+Most language model implementations rely on heavy frameworks like PyTorch or TensorFlow, which abstract away the core mechanics of how these models actually work.
+ZigFormer takes a different approach by implementing everything from scratch in Zig, making it ideal for:
+
+- **Learning**: Understanding transformer architecture by reading clean, well-documented code
+- **Experimentation**: Modifying and extending the model without framework constraints
+- **Performance**: Leveraging Zig's speed and control for efficient training and inference
+- **Transparency**: Seeing exactly how attention mechanisms, embeddings, and training loops work
+
+By building everything from the ground up using only basic linear algebra operations, ZigFormer demystifies the "magic" behind large language models.
 
 ### Features
 
