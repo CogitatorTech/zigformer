@@ -31,7 +31,7 @@ It can be used as a [Zig library](https://CogitatorTech.github.io/zigformer/) fo
 [standalone application](https://github.com/CogitatorTech/zigformer/releases/latest)
 for training, inference, and chatting with the model.
 
-The diagrams below show the high-level architecture and its core components.
+The diagrams below show the high-level architecture of ZigFormer and the workflow of training and inference.
 
 ![ZigFormer Architecture](assets/diagrams/zigformer_architecture_v0.1.0.svg)
 
