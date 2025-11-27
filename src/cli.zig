@@ -334,7 +334,7 @@ pub fn main() anyerror!void {
     var root_cmd = try chilli.Command.init(allocator, .{
         .name = "zigformer-cli",
         .description = "An educational transformer-based LLM in Zig",
-        .version = "v0.1.1",
+        .version = "v0.1.2",
         .exec = execRoot,
     });
     defer root_cmd.deinit();
