@@ -27,7 +27,7 @@ const Config = struct {
     }
 };
 
-// Global state for the server
+// Global state holders for the server
 const ServerState = struct {
     allocator: std.mem.Allocator,
     model: *llm.LLM,

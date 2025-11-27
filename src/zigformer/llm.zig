@@ -674,24 +674,6 @@ pub const LLM = struct {
     }
 
     pub fn setBatchSize(self: *LLM, batch_size: usize) void {
-        // Iterate over layers and set batch_size for SelfAttention layers
-        // Note: We need to know which layers are SelfAttention.
-        // In our simple structure, we know layers 1, 2, 3 are TransformerBlocks.
-        // TransformerBlock contains SelfAttention.
-        // But Layer is type-erased.
-        // Ideally, we should add setBatchSize to Layer vtable, but that's a big change.
-        // For now, we'll rely on the known structure and pointer casting, which is risky but fits the current style.
-        // Actually, TransformerBlock has a setBatchSize method we should add.
-        // Let's assume we add setBatchSize to TransformerBlock and call it here.
-
-        // Wait, we can't easily cast opaque pointers back to types without RTTI or knowing the type.
-        // Given the fixed structure:
-        // Layer 0: Embeddings (no batch_size needed)
-        // Layer 1: TransformerBlock
-        // Layer 2: TransformerBlock
-        // Layer 3: TransformerBlock
-        // Layer 4: OutputProjection (no batch_size needed)
-
         const embeddings: *Embeddings = @ptrCast(@alignCast(self.network.items[0].self));
         embeddings.setBatchSize(batch_size);
 
