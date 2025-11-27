@@ -23,7 +23,16 @@ programming language.
 It aims to provide a clean, easy-to-understand LLM implementation with no large dependencies like PyTorch or TensorFlow.
 ZigFormer was mainly made for learning how a conventional transformer-based LLM works under the hood and is
 inspired by Andrej Karpathy's [nanoGPT](https://github.com/karpathy/nanoGPT)
-and [nanochat](https://github.com/karpathy/nanochat) projects.
+and [nanochat](https://github.com/karpathy/nanochat) projects, and follows the architecture described in the
+["Attention Is All You Need"](https://arxiv.org/abs/1706.03762) and
+["Language Models are Unsupervised Multitask Learners"](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf)
+papers.
+
+The diagrams below show the high-level architecture and its core components.
+
+![ZigFormer Architecture](assets/diagrams/zigformer_architecture_v0.1.0.svg)
+
+![ZigFormer Workflow](assets/diagrams/zigformer_workflow_v0.1.0.svg)
 
 ### Features
 
@@ -54,8 +63,9 @@ cd zigformer
 zig build
 ```
 
-> [!NOTE]
+> [!IMPORTANT]
 > ZigFormer is developed and tested with Zig 0.15.2.
+> It should work with newer versions, but it is not guaranteed.
 
 #### Training a Model
 
@@ -94,6 +104,9 @@ zig build run -- --config my_config.json
 }
 ```
 
+> [!IMPORTANT]
+> A saved model only works with the model with the same configuration.
+
 #### Using the Web UI
 
 You can run the web-based UI to chat with the trained model:
@@ -131,6 +144,26 @@ zig build run-gui -- --config gui_config.json
 zig build run -- --help
 zig build run -- predict --help
 zig build run-gui -- --help
+```
+
+#### Example Usage
+
+```bash
+# Make sure to train the model first
+zig build run -- --save-model model.bin
+```
+
+```bash
+# Inference with greedy decoding
+zig build run -- predict --prompt "How do mountains form?" --beam-width 5
+```
+
+```bash
+zig build run -- predict --prompt "How do mountains form?" --top-k 5 --load-model model.bin
+```
+
+```bash
+zig build run-gui -- --load-model model.bin
 ```
 
 ---

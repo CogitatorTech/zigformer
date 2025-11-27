@@ -150,43 +150,13 @@ pub const LLM = struct {
         var tokens = std.ArrayList(u32){};
         errdefer tokens.deinit(self.allocator);
         try tokens.ensureTotalCapacity(self.allocator, text.len / 4);
-        var it = std.mem.splitScalar(u8, text, ' ');
-        while (it.next()) |word| {
-            // Special case for end token
-            if (std.mem.eql(u8, word, "</s>")) {
-                if (self.vocab.encode(word)) |token_id| {
-                    try tokens.append(self.allocator, token_id);
-                }
-                continue;
-            }
 
-            var start: usize = 0;
-            for (word, 0..) |c, i| {
-                if (std.ascii.isPrint(c) and !std.ascii.isAlphanumeric(c)) {
-                    // If we have a word before the punctuation, add it
-                    if (i > start) {
-                        const sub_word = word[start..i];
-                        if (self.vocab.encode(sub_word)) |token_id| {
-                            try tokens.append(self.allocator, token_id);
-                        }
-                    }
+        var raw_tokens = try Vocab.tokenizeRaw(self.allocator, text);
+        defer raw_tokens.deinit(self.allocator);
 
-                    // Add the punctuation as its own token
-                    const punct_slice = word[i .. i + 1];
-                    if (self.vocab.encode(punct_slice)) |token_id| {
-                        try tokens.append(self.allocator, token_id);
-                    }
-
-                    start = i + 1;
-                }
-            }
-
-            // Add any remaining word
-            if (start < word.len) {
-                const sub_word = word[start..];
-                if (self.vocab.encode(sub_word)) |token_id| {
-                    try tokens.append(self.allocator, token_id);
-                }
+        for (raw_tokens.items) |word| {
+            if (self.vocab.encode(word)) |token_id| {
+                try tokens.append(self.allocator, token_id);
             }
         }
         return tokens;
@@ -393,7 +363,7 @@ pub const LLM = struct {
 
                 // Run forward pass
                 var input_matrix = try Matrix.init(self.allocator, 1, node.sequence.items.len);
-                errdefer input_matrix.deinit();
+                defer input_matrix.deinit();
                 for (node.sequence.items, 0..) |tok, i| {
                     input_matrix.data[i] = @floatFromInt(tok);
                 }

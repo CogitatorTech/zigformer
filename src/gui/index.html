@@ -1,92 +1,304 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta content="width=device-width, initial-scale=1.0" name="viewport">
-    <title>ZigFormer Chat</title>
+    <title>ZigFormer AI</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <link rel="stylesheet"
+        href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <style>
         :root {
-            --bg-color: #1e1e2e;
-            --text-color: #cdd6f4;
-            --input-bg: #313244;
-            --user-msg-bg: #89b4fa;
-            --user-msg-text: #1e1e2e;
-            --bot-msg-bg: #45475a;
-            --bot-msg-text: #cdd6f4;
+            --bg-color: #0f1117;
+            --sidebar-bg: #161b22;
+            --chat-bg: #0f1117;
+            --input-bg: #21262d;
+            --border-color: #30363d;
+            --accent-color: #f7a41d;
+            --text-primary: #c9d1d9;
+            --text-secondary: #8b949e;
+            --user-msg-bg: #1f6feb;
+            --bot-msg-bg: #161b22;
+        }
+
+        [data-theme="light"] {
+            --bg-color: #ffffff;
+            --sidebar-bg: #f6f8fa;
+            --chat-bg: #ffffff;
+            --input-bg: #ffffff;
+            --border-color: #d0d7de;
+            --accent-color: #f7a41d;
+            --text-primary: #24292f;
+            --text-secondary: #57606a;
+            --user-msg-bg: #0969da;
+            --bot-msg-bg: #f6f8fa;
+        }
+
+        * {
+            box-sizing: border-box;
         }
 
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: 'Inter', sans-serif;
             background-color: var(--bg-color);
-            color: var(--text-color);
+            color: var(--text-primary);
             margin: 0;
             display: flex;
-            flex-direction: column;
             height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Sidebar */
+        #sidebar {
+            width: 280px;
+            background-color: var(--sidebar-bg);
+            border-right: 1px solid var(--border-color);
+            padding: 20px;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            transition: transform 0.3s ease;
+        }
+
+        .logo {
+            font-size: 20px;
+            font-weight: 600;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .logo span {
+            color: var(--accent-color);
+        }
+
+        .settings-group {
+            background: var(--input-bg);
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+
+        .settings-title {
+            font-size: 12px;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            margin-bottom: 15px;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+        }
+
+        .control {
+            margin-bottom: 15px;
+        }
+
+        .control:last-child {
+            margin-bottom: 0;
+        }
+
+        label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 13px;
+            margin-bottom: 8px;
+            color: var(--text-primary);
+        }
+
+        input[type="range"] {
+            width: 100%;
+            height: 4px;
+            background: var(--border-color);
+            border-radius: 2px;
+            appearance: none;
+            outline: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            background: var(--accent-color);
+            border-radius: 50%;
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+
+        input[type="range"]::-webkit-slider-thumb:hover {
+            transform: scale(1.2);
+        }
+
+        .value-display {
+            color: var(--accent-color);
+            font-family: monospace;
+        }
+
+        .theme-toggle {
+            background: none;
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 8px;
+            border-radius: 6px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            margin-top: auto;
+            transition: background 0.2s;
+        }
+
+        .theme-toggle:hover {
+            background: var(--input-bg);
+        }
+
+        /* Main Chat Area */
+        #main {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            position: relative;
         }
 
         #chat-container {
             flex: 1;
             overflow-y: auto;
-            padding: 20px;
+            padding: 40px;
             display: flex;
             flex-direction: column;
-            gap: 15px;
+            gap: 24px;
+            scroll-behavior: smooth;
         }
 
         .message {
-            max-width: 80%;
-            padding: 12px 16px;
-            border-radius: 12px;
-            line-height: 1.5;
-            position: relative;
-            word-wrap: break-word;
-        }
-
-        .user-message {
-            align-self: flex-end;
-            background-color: var(--user-msg-bg);
-            color: var(--user-msg-text);
-            border-bottom-right-radius: 2px;
-        }
-
-        .bot-message {
-            align-self: flex-start;
-            background-color: var(--bot-msg-bg);
-            color: var(--bot-msg-text);
-            border-bottom-left-radius: 2px;
-        }
-
-        #input-area {
-            padding: 20px;
-            background-color: #181825;
+            max-width: 800px;
+            width: 100%;
+            margin: 0 auto;
             display: flex;
-            gap: 10px;
+            gap: 16px;
+            animation: fadeIn 0.3s ease;
+        }
+
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+                transform: translateY(10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            font-size: 14px;
+            flex-shrink: 0;
+        }
+
+        .user-avatar {
+            background-color: var(--user-msg-bg);
+            color: white;
+        }
+
+        .bot-avatar {
+            background-color: var(--accent-color);
+            color: #0f1117;
+        }
+
+        .message-content {
+            flex: 1;
+            line-height: 1.6;
+            font-size: 15px;
+            padding-top: 4px;
+        }
+
+        .message-content p {
+            margin: 0 0 16px 0;
+        }
+
+        .message-content p:last-child {
+            margin-bottom: 0;
+        }
+
+        /* Markdown Styles */
+        .message-content pre {
+            background: #161b22;
+            padding: 16px;
+            border-radius: 6px;
+            overflow-x: auto;
+            border: 1px solid var(--border-color);
+        }
+
+        .message-content code {
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+            font-size: 13px;
+        }
+
+        .message-content :not(pre)>code {
+            background: rgba(110, 118, 129, 0.4);
+            padding: 2px 4px;
+            border-radius: 4px;
+        }
+
+        /* Input Area */
+        #input-area {
+            padding: 24px;
+            background: var(--bg-color);
+            border-top: 1px solid var(--border-color);
+        }
+
+        .input-wrapper {
+            max-width: 800px;
+            margin: 0 auto;
+            position: relative;
         }
 
         #prompt-input {
-            flex: 1;
-            padding: 12px;
-            border-radius: 8px;
-            border: none;
+            width: 100%;
+            padding: 16px 50px 16px 16px;
+            border-radius: 12px;
+            border: 1px solid var(--border-color);
             background-color: var(--input-bg);
-            color: var(--text-color);
+            color: var(--text-primary);
             font-size: 16px;
+            font-family: inherit;
+            resize: none;
+            height: 56px;
+            line-height: 24px;
             outline: none;
+            transition: border-color 0.2s;
+            overflow: hidden;
         }
 
         #prompt-input:focus {
-            box-shadow: 0 0 0 2px #89b4fa;
+            border-color: var(--accent-color);
         }
 
         #send-btn {
-            padding: 0 20px;
-            border-radius: 8px;
+            position: absolute;
+            right: 12px;
+            bottom: 12px;
+            background: var(--accent-color);
+            color: white;
             border: none;
-            background-color: #89b4fa;
-            color: #1e1e2e;
-            font-weight: bold;
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
             cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             transition: opacity 0.2s;
         }
 
@@ -95,99 +307,287 @@
         }
 
         #send-btn:disabled {
-            background-color: #45475a;
+            background: var(--border-color);
             cursor: not-allowed;
         }
 
-        .loading {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid rgba(255, 255, 255, .3);
-            border-radius: 50%;
-            border-top-color: #fff;
-            animation: spin 1s ease-in-out infinite;
+        #send-btn svg {
+            width: 16px;
+            height: 16px;
+            fill: currentColor;
         }
 
-        @keyframes spin {
-            to {
-                transform: rotate(360deg);
+        .loading-dots {
+            display: flex;
+            gap: 4px;
+            padding: 8px 0;
+        }
+
+        .dot {
+            width: 8px;
+            height: 8px;
+            background: var(--text-secondary);
+            border-radius: 50%;
+            animation: pulse 1.4s infinite ease-in-out both;
+        }
+
+        .dot:nth-child(1) {
+            animation-delay: -0.32s;
+        }
+
+        .dot:nth-child(2) {
+            animation-delay: -0.16s;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            80%,
+            100% {
+                transform: scale(0);
+            }
+
+            40% {
+                transform: scale(1);
+            }
+        }
+
+        /* Mobile Responsive */
+        @media (max-width: 768px) {
+            #sidebar {
+                display: none;
+                /* Hide sidebar on mobile for now */
             }
         }
     </style>
 </head>
+
 <body>
-<div id="chat-container">
-    <div class="message bot-message">
-        Hello! I am ZigFormer. How can I help you today?
+    <div id="sidebar">
+        <div class="logo">
+            <span>⚡</span> ZigFormer
+        </div>
+
+        <div class="settings-group">
+            <div class="settings-title">Generation Parameters</div>
+
+            <div class="control">
+                <label>
+                    Top-K
+                    <span id="top-k-val" class="value-display">0</span>
+                </label>
+                <input type="range" id="top-k" min="0" max="50" value="0" step="1">
+            </div>
+
+            <div class="control">
+                <label>
+                    Top-P
+                    <span id="top-p-val" class="value-display">0.0</span>
+                </label>
+                <input type="range" id="top-p" min="0" max="1" value="0" step="0.05">
+            </div>
+        </div>
+
+        <div class="settings-group">
+            <div class="settings-title">Model Stats</div>
+            <div class="control">
+                <label>Vocab Size: <span id="stat-vocab" class="value-display">-</span></label>
+            </div>
+            <div class="control">
+                <label>Embed Dim: <span id="stat-embed" class="value-display">-</span></label>
+            </div>
+            <div class="control">
+                <label>Hidden Dim: <span id="stat-hidden" class="value-display">-</span></label>
+            </div>
+            <div class="control">
+                <label>Max Seq: <span id="stat-seq" class="value-display">-</span></label>
+            </div>
+            <div class="control">
+                <label>Heads: <span id="stat-heads" class="value-display">-</span></label>
+            </div>
+        </div>
+
+        <button class="theme-toggle" id="theme-btn">
+            Toggle Theme 🌓
+        </button>
     </div>
-</div>
-<div id="input-area">
-    <input autocomplete="off" id="prompt-input" placeholder="Type your message..." type="text">
-    <button id="send-btn">Send</button>
-</div>
 
-<script>
-    const chatContainer = document.getElementById('chat-container');
-    const promptInput = document.getElementById('prompt-input');
-    const sendBtn = document.getElementById('send-btn');
+    <div id="main">
+        <div id="chat-container">
+            <div class="message">
+                <div class="avatar bot-avatar">ZF</div>
+                <div class="message-content">
+                    <p>Hi! I am ZigFormer, an AI like ChatGPT. I can help you with questions, code, and more.
+                        (Try adjusting the sampling parameters in the sidebar to control my creativity!)</p>
+                </div>
+            </div>
+        </div>
 
-    function addMessage(text, isUser) {
-        const div = document.createElement('div');
-        div.className = `message ${isUser ? 'user-message' : 'bot-message'}`;
-        div.textContent = text;
-        chatContainer.appendChild(div);
-        chatContainer.scrollTop = chatContainer.scrollHeight;
-    }
+        <div id="input-area">
+            <div class="input-wrapper">
+                <textarea id="prompt-input" placeholder="Type in to chat with ZigFormer" rows="1"></textarea>
+                <button id="send-btn">
+                    <svg viewBox="0 0 24 24">
+                        <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path>
+                    </svg>
+                </button>
+            </div>
+        </div>
+    </div>
 
-    async function sendMessage() {
-        const text = promptInput.value.trim();
-        if (!text) return;
+    <script>
+        // Theme Logic
+        const themeBtn = document.getElementById('theme-btn');
+        const html = document.documentElement;
 
-        addMessage(text, true);
-        promptInput.value = '';
-        promptInput.disabled = true;
-        sendBtn.disabled = true;
+        // Load saved theme
+        const savedTheme = localStorage.getItem('theme') || 'dark';
+        html.setAttribute('data-theme', savedTheme);
 
-        // Add loading indicator
-        const loadingDiv = document.createElement('div');
-        loadingDiv.className = 'message bot-message';
-        loadingDiv.innerHTML = '<div class="loading"></div>';
-        chatContainer.appendChild(loadingDiv);
-        chatContainer.scrollTop = chatContainer.scrollHeight;
+        themeBtn.addEventListener('click', () => {
+            const current = html.getAttribute('data-theme');
+            const next = current === 'dark' ? 'light' : 'dark';
+            html.setAttribute('data-theme', next);
+            localStorage.setItem('theme', next);
+        });
 
-        try {
-            const response = await fetch('/chat', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({prompt: text})
-            });
-
-            const data = await response.json();
-
-            // Remove loading
-            chatContainer.removeChild(loadingDiv);
-
-            if (data.error) {
-                addMessage("Error: " + data.error, false);
-            } else {
-                addMessage(data.response, false);
+        // Load Stats
+        async function loadStats() {
+            try {
+                const res = await fetch('/stats');
+                const data = await res.json();
+                document.getElementById('stat-vocab').textContent = data.vocab_size;
+                document.getElementById('stat-embed').textContent = data.embedding_dim;
+                document.getElementById('stat-hidden').textContent = data.hidden_dim;
+                document.getElementById('stat-seq').textContent = data.max_seq_len;
+                document.getElementById('stat-heads').textContent = data.num_heads;
+            } catch (e) {
+                console.error("Failed to load stats", e);
             }
-        } catch (e) {
-            chatContainer.removeChild(loadingDiv);
-            addMessage("Error: Failed to connect to server.", false);
-            console.error(e);
+        }
+        loadStats();
+
+        // Setup Markdown
+        marked.setOptions({
+            highlight: function (code, lang) {
+                if (lang && hljs.getLanguage(lang)) {
+                    return hljs.highlight(code, { language: lang }).value;
+                }
+                return hljs.highlightAuto(code).value;
+            },
+            breaks: true
+        });
+
+        // UI Elements
+        const chatContainer = document.getElementById('chat-container');
+        const promptInput = document.getElementById('prompt-input');
+        const sendBtn = document.getElementById('send-btn');
+        const topKInput = document.getElementById('top-k');
+        const topPInput = document.getElementById('top-p');
+        const topKVal = document.getElementById('top-k-val');
+        const topPVal = document.getElementById('top-p-val');
+
+        // Update slider values
+        topKInput.addEventListener('input', (e) => topKVal.textContent = e.target.value);
+        topPInput.addEventListener('input', (e) => topPVal.textContent = e.target.value);
+
+        // Auto-resize textarea
+        promptInput.addEventListener('input', function () {
+            this.style.height = 'auto';
+            this.style.height = (this.scrollHeight) + 'px';
+            if (this.value === '') this.style.height = '56px';
+        });
+
+        function addMessage(text, isUser) {
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'message';
+
+            const avatar = document.createElement('div');
+            avatar.className = `avatar ${isUser ? 'user-avatar' : 'bot-avatar'}`;
+            avatar.textContent = isUser ? 'You' : 'ZF';
+
+            const content = document.createElement('div');
+            content.className = 'message-content';
+
+            if (isUser) {
+                content.textContent = text;
+            } else {
+                content.innerHTML = marked.parse(text);
+            }
+
+            msgDiv.appendChild(avatar);
+            msgDiv.appendChild(content);
+            chatContainer.appendChild(msgDiv);
+
+            // Scroll to bottom
+            chatContainer.scrollTop = chatContainer.scrollHeight;
         }
 
-        promptInput.disabled = false;
-        sendBtn.disabled = false;
-        promptInput.focus();
-    }
+        async function sendMessage() {
+            const text = promptInput.value.trim();
+            if (!text) return;
 
-    sendBtn.addEventListener('click', sendMessage);
-    promptInput.addEventListener('keypress', (e) => {
-        if (e.key === 'Enter') sendMessage();
-    });
-</script>
+            addMessage(text, true);
+            promptInput.value = '';
+            promptInput.style.height = '56px';
+            promptInput.disabled = true;
+            sendBtn.disabled = true;
+
+            // Loading indicator
+            const loadingDiv = document.createElement('div');
+            loadingDiv.className = 'message';
+            loadingDiv.innerHTML = `
+                <div class="avatar bot-avatar">ZF</div>
+                <div class="message-content">
+                    <div class="loading-dots">
+                        <div class="dot"></div>
+                        <div class="dot"></div>
+                        <div class="dot"></div>
+                    </div>
+                </div>
+            `;
+            chatContainer.appendChild(loadingDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+
+            try {
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        prompt: text,
+                        top_k: parseInt(topKInput.value),
+                        top_p: parseFloat(topPInput.value)
+                    })
+                });
+
+                const data = await response.json();
+
+                chatContainer.removeChild(loadingDiv);
+
+                if (data.error) {
+                    addMessage("Error: " + data.error, false);
+                } else {
+                    addMessage(data.response, false);
+                }
+            } catch (e) {
+                chatContainer.removeChild(loadingDiv);
+                addMessage("Error: Failed to connect to server.", false);
+                console.error(e);
+            }
+
+            promptInput.disabled = false;
+            sendBtn.disabled = false;
+            promptInput.focus();
+        }
+
+        sendBtn.addEventListener('click', sendMessage);
+        promptInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+    </script>
 </body>
+
 </html>

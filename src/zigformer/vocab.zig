@@ -122,6 +122,47 @@ pub const Vocab = struct {
         vocab.owns_words = true; // We allocated these words, so we own them
         return vocab;
     }
+
+    /// Split text into raw token strings (words and punctuation).
+    /// Caller owns the returned ArrayList and its contents (if duplicated).
+    /// However, this function returns slices of the input `text` to avoid allocation where possible.
+    /// But wait, splitText in cli.zig duplicated? No, it appended slices.
+    /// Let's return slices of `text`.
+    pub fn tokenizeRaw(allocator: std.mem.Allocator, text: []const u8) !std.ArrayList([]const u8) {
+        var list = std.ArrayList([]const u8){};
+        errdefer list.deinit(allocator);
+
+        var it = std.mem.splitScalar(u8, text, ' ');
+        while (it.next()) |word| {
+            if (word.len == 0) continue;
+
+            // Special case for end token
+            if (std.mem.eql(u8, word, "</s>")) {
+                try list.append(allocator, word);
+                continue;
+            }
+
+            var start: usize = 0;
+            for (word, 0..) |c, i| {
+                if (std.ascii.isPrint(c) and !std.ascii.isAlphanumeric(c)) {
+                    // If we have a word before the punctuation, add it
+                    if (i > start) {
+                        try list.append(allocator, word[start..i]);
+                    }
+
+                    // Add the punctuation as its own token
+                    try list.append(allocator, word[i .. i + 1]);
+
+                    start = i + 1;
+                }
+            }
+            // Add remaining part of the word
+            if (start < word.len) {
+                try list.append(allocator, word[start..]);
+            }
+        }
+        return list;
+    }
 };
 
 test "Vocab init and build" {

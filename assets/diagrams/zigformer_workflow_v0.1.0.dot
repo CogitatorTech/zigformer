@@ -1,0 +1,79 @@
+digraph ZigFormerWorkflow {
+    fontname = "Helvetica,Arial,sans-serif"
+    layout = dot
+    rankdir = LR
+    ranksep = 0.5;
+    nodesep = 0.4;
+    splines = true;
+    compound = true;
+
+    node [
+    fontname = "Helvetica,Arial,sans-serif",
+    shape = box,
+    style = "filled,rounded",
+    color = "grey",
+    fillcolor = "white",
+    penwidth = 1,
+    fontsize = 10,
+    height = 0.4
+    ]
+    edge [
+    fontname = "Helvetica,Arial,sans-serif",
+    color = "black",
+    fontsize = 8,
+    labeldistance = 1.5,
+    arrowsize = 0.7
+    ]
+
+    subgraph cluster_prep {
+    label = "1. Preparation"
+    style = "dashed"
+    color = "lightgrey"
+    margin = 8
+    fontsize = 10
+    raw_data [label = "Raw Text\n(Corpus)", fillcolor = "oldlace"]
+    vocab_builder [label = "Vocab Builder", fillcolor = "lightblue"]
+    dataset [label = "Tokenized\nDataset", shape = note, fillcolor = "lightyellow"]
+    }
+
+    subgraph cluster_training {
+    label = "2. Training"
+    style = "dashed"
+    color = "lightgrey"
+    margin = 8
+    fontsize = 10
+    init_model [label = "Init Model\n(Random Weights)", fillcolor = "lightblue"]
+    train_loop [label = "Training Loop\n(Forward/Backprop)", fillcolor = "lightblue"]
+    optimizer [label = "Adam\nOptimizer", fillcolor = "white"]
+    model_file [label = "model.bin", shape = note, fillcolor = "gold"]
+    }
+
+    subgraph cluster_inference {
+    label = "3. Inference"
+    style = "dashed"
+    color = "lightgrey"
+    margin = 8
+    fontsize = 10
+    cli_load [label = "Load Model", fillcolor = "lightblue"]
+    user_prompt [label = "User Prompt", fillcolor = "oldlace"]
+    generate [label = "Generate\n(Sampling)", fillcolor = "lightblue"]
+    output_text [label = "Output Text", fillcolor = "oldlace"]
+    }
+
+    // Preparation Flow
+    raw_data -> vocab_builder
+    vocab_builder -> dataset [label = "Encode"]
+
+    // Training Flow
+    vocab_builder -> init_model [label = "Vocab Size"]
+    dataset -> train_loop [label = "Batches"]
+    init_model -> train_loop
+    train_loop -> optimizer [dir = both, label = "Grads/Update"]
+    train_loop -> model_file [label = "Save"]
+
+    // Inference Flow
+    model_file -> cli_load
+    user_prompt -> generate
+    cli_load -> generate
+    generate -> output_text
+}

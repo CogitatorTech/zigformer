@@ -74,8 +74,10 @@ pub const TransformerBlock = struct {
     }
 
     pub fn backward(self: *TransformerBlock, grads: lib.linalg.Matrix, lr: f32) !lib.linalg.Matrix {
+        var mut_grads = grads;
+        defer mut_grads.deinit();
         // Backprop through second residual: y = x' + FFN(LN(x'))
-        var grad_residual2 = try grads.clone();
+        var grad_residual2 = try mut_grads.clone();
         defer grad_residual2.deinit();
         const grads_for_ff = try grads.clone();
         const grad_ff = try self.feed_forward.backward(grads_for_ff, lr); // consumes grads_for_ff
@@ -162,8 +164,7 @@ test "TransformerBlock" {
     try std.testing.expectEqual(input.cols, output.cols);
 
     // Test Backward
-    var grads = try Matrix.initRandom(allocator, 2, embedding_dim, 0.0, 1.0);
-    defer grads.deinit();
+    const grads = try Matrix.initRandom(allocator, 2, embedding_dim, 0.0, 1.0);
     var grad_input = try tb.backward(grads, 0.01);
     defer grad_input.deinit();
 
@@ -244,7 +245,7 @@ test "TransformerBlock residual connections" {
     defer output.deinit();
 
     // The residual connections should ensure output magnitude is related to input
-    // This is a basic sanity check that residuals are working
+    // This is a baseline sanity check that residuals are working correctly
     var input_norm: f32 = 0;
     var output_norm: f32 = 0;
     for (input.data) |val| input_norm += val * val;

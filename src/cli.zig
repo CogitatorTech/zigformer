@@ -77,15 +77,6 @@ fn validateConfig(config: Config) void {
         std.process.exit(1);
     }
 }
-fn splitText(text: []const u8, allocator: std.mem.Allocator) !std.ArrayList([]const u8) {
-    var list = std.ArrayList([]const u8){};
-    errdefer list.deinit(allocator);
-    var it = std.mem.splitScalar(u8, text, ' ');
-    while (it.next()) |word| {
-        try list.append(allocator, word);
-    }
-    return list;
-}
 
 fn stringLessThan(_: void, lhs: []const u8, rhs: []const u8) bool {
     return std.mem.lessThan(u8, lhs, rhs);
@@ -99,7 +90,7 @@ fn readJsonLines(allocator: std.mem.Allocator, path: []const u8) !JsonData {
 
     const parsed = std.json.parseFromSlice([]const []const u8, allocator, contents, .{}) catch |err| {
         std.debug.print("Error parsing JSON file: {s}\n", .{path});
-        std.debug.print("Ensure it is a valid JSON array of strings.\n", .{});
+        std.debug.print("Make sure it is a valid JSON array of strings.\n", .{});
         allocator.free(contents);
         return err;
     };
@@ -113,7 +104,7 @@ fn buildVocabFromDatasets(allocator: std.mem.Allocator, pretrain: []const []cons
     try vocab_set.put("</s>", {});
 
     for (pretrain) |text| {
-        var words = try splitText(text, allocator);
+        var words = try vocab.Vocab.tokenizeRaw(allocator, text);
         defer words.deinit(allocator);
         for (words.items) |word| {
             try vocab_set.put(word, {});
@@ -121,7 +112,7 @@ fn buildVocabFromDatasets(allocator: std.mem.Allocator, pretrain: []const []cons
     }
 
     for (chat) |text| {
-        var words = try splitText(text, allocator);
+        var words = try vocab.Vocab.tokenizeRaw(allocator, text);
         defer words.deinit(allocator);
         for (words.items) |word| {
             try vocab_set.put(word, {});
@@ -322,6 +313,9 @@ fn execPredict(ctx: chilli.CommandContext) !void {
     const prompt = try ctx.getFlag("prompt", []const u8);
     const load_model_path = try ctx.getFlag("load-model", []const u8);
     const beam_width: usize = @intCast(try ctx.getFlag("beam-width", i64));
+    const top_k: usize = @intCast(try ctx.getFlag("top-k", i64));
+    const top_p_str = try ctx.getFlag("top-p", []const u8);
+    const top_p = parseF32Default(top_p_str, 0.0);
 
     var model = if (load_model_path.len > 0) blk: {
         break :blk try llm.LLM.load(allocator, load_model_path);
@@ -345,7 +339,11 @@ fn execPredict(ctx: chilli.CommandContext) !void {
     defer allocator.free(formatted_input);
 
     var result: []u8 = undefined;
-    if (beam_width > 1) {
+    if (top_k > 0) {
+        result = try model.predictWithSampling(formatted_input, .topk, top_k, 0.0);
+    } else if (top_p > 0.0) {
+        result = try model.predictWithSampling(formatted_input, .topp, 0, top_p);
+    } else if (beam_width > 1) {
         result = try model.beamSearch(formatted_input, beam_width, 50); // Default 50 max new tokens
     } else {
         result = try model.predict(formatted_input);
@@ -470,6 +468,18 @@ pub fn main() anyerror!void {
         .description = "Path to training dataset (used to build vocabulary)",
         .type = .String,
         .default_value = .{ .String = "datasets/simple_dataset/train.json" },
+    });
+    try predict_cmd.addFlag(.{
+        .name = "top-k",
+        .description = "Top-K sampling (default: 0 = disabled)",
+        .type = .Int,
+        .default_value = .{ .Int = 0 },
+    });
+    try predict_cmd.addFlag(.{
+        .name = "top-p",
+        .description = "Top-P sampling (default: 0.0 = disabled)",
+        .type = .String,
+        .default_value = .{ .String = "0.0" },
     });
 
     try root_cmd.addSubcommand(predict_cmd);

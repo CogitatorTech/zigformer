@@ -1,0 +1,122 @@
+digraph ZigFormerArchitecture {
+    fontname = "Helvetica,Arial,sans-serif"
+    layout = dot
+    rankdir = LR
+    ranksep = 0.3;
+    nodesep = 0.2;
+    splines = true;
+    compound = true;
+
+    node [
+    fontname = "Helvetica,Arial,sans-serif",
+    shape = box,
+    style = "filled,rounded",
+    color = "grey",
+    fillcolor = "white",
+    penwidth = 1,
+    fontsize = 10,
+    height = 0.4
+    ]
+    edge [
+    fontname = "Helvetica,Arial,sans-serif",
+    color = "black",
+    fontsize = 8,
+    labeldistance = 1.5,
+    arrowsize = 0.7
+    ]
+
+    subgraph cluster_input {
+    label = "Input"
+    style = "dashed"
+    color = "lightgrey"
+    margin = 6
+    fontsize = 10
+    prompt [label = "Prompt", fillcolor = "oldlace"]
+    tokenizer [label = "Tokenizer", fillcolor = "oldlace"]
+    embeddings [label = "Embeddings", fillcolor = "oldlace"]
+    }
+
+    subgraph cluster_transformer {
+    label = "Transformer (xN)"
+    style = "dashed"
+    color = "lightgrey"
+    margin = 6
+    fontsize = 10
+
+    subgraph cluster_attn {
+    label = "Self-Attention"
+    style = "solid"
+    color = "lightblue"
+    margin = 4
+    ln1 [label = "LN 1", fillcolor = "white"]
+    qkv [label = "QKV", fillcolor = "white"]
+    attn_score [label = "Attn", fillcolor = "white"]
+    attn_out [label = "Proj", fillcolor = "white"]
+    }
+
+    subgraph cluster_ffn {
+    label = "FFN"
+    style = "solid"
+    color = "lightyellow"
+    margin = 4
+    ln2 [label = "LN 2", fillcolor = "white"]
+    ffn_up [label = "Up", fillcolor = "white"]
+    act [label = "ReLU", fillcolor = "white"]
+    ffn_down [label = "Down", fillcolor = "white"]
+    }
+
+    residual_1 [label = "+", shape = circle, width = 0.3, fixedsize = true, fillcolor = "lightgrey", fontsize = 10]
+    residual_2 [label = "+", shape = circle, width = 0.3, fixedsize = true, fillcolor = "lightgrey", fontsize = 10]
+    }
+
+    subgraph cluster_output_head {
+    label = "Output"
+    style = "dashed"
+    color = "lightgrey"
+    margin = 6
+    fontsize = 10
+    logits [label = "Logits", fillcolor = "oldlace"]
+    softmax [label = "Softmax", fillcolor = "oldlace"]
+    }
+
+    subgraph cluster_decoding {
+    label = "Decoding"
+    style = "dashed"
+    color = "lightgrey"
+    margin = 6
+    fontsize = 10
+    sampling [label = "Sampling\n(Greedy/Top-k/p)", fillcolor = "lightblue", shape = box, fontsize = 9]
+    next_token [label = "Next\nToken", fillcolor = "gold", fontsize = 9]
+    }
+
+    // Input Flow
+    prompt -> tokenizer
+    tokenizer -> embeddings
+    embeddings -> ln1 [lhead = cluster_transformer]
+
+    // Transformer Flow
+    ln1 -> qkv
+    qkv -> attn_score
+    attn_score -> attn_out
+
+    embeddings -> residual_1 [style = dashed]
+    attn_out -> residual_1
+
+    residual_1 -> ln2
+
+    ln2 -> ffn_up
+    ffn_up -> act
+    act -> ffn_down
+
+    residual_1 -> residual_2 [style = dashed]
+    ffn_down -> residual_2
+
+    // Output Flow
+    residual_2 -> logits [ltail = cluster_transformer]
+    logits -> softmax
+    softmax -> sampling
+    sampling -> next_token
+
+    // Autoregressive Loop
+    next_token -> embeddings [label = "Loop", style = dotted, constraint = false]
+}

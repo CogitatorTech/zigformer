@@ -209,6 +209,26 @@ fn handleConnection(state: *ServerState, stream: std.net.Stream, config: *const 
         return;
     }
 
+    // Handle GET /stats
+    if (std.mem.startsWith(u8, method, "GET") and std.mem.eql(u8, path, "/stats")) {
+        const vocab_size = state.model.vocab.size();
+        const embedding_dim = zigformer.config.embedding_dim;
+        const hidden_dim = zigformer.config.hidden_dim;
+        const max_seq_len = zigformer.config.max_seq_len;
+        const num_heads = zigformer.config.num_heads;
+
+        // Manual JSON construction
+        var json = std.ArrayList(u8){};
+        defer json.deinit(state.allocator);
+
+        try std.fmt.format(json.writer(state.allocator), "{{\"vocab_size\": {}, \"embedding_dim\": {}, \"hidden_dim\": {}, \"max_seq_len\": {}, \"num_heads\": {}}}", .{ vocab_size, embedding_dim, hidden_dim, max_seq_len, num_heads });
+
+        const response = try std.fmt.allocPrint(state.allocator, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{s}", .{ json.items.len, json.items });
+        defer state.allocator.free(response);
+        _ = try stream.writeAll(response);
+        return;
+    }
+
     // Handle POST /chat
     if (std.mem.startsWith(u8, method, "POST") and std.mem.startsWith(u8, path, "/chat")) {
         // Find body (after \r\n\r\n)
@@ -219,7 +239,11 @@ fn handleConnection(state: *ServerState, stream: std.net.Stream, config: *const 
         };
         const body = request[body_start + 4 ..];
 
-        const RequestBody = struct { prompt: []const u8 };
+        const RequestBody = struct {
+            prompt: []const u8,
+            top_k: ?usize = null,
+            top_p: ?f32 = null,
+        };
         const parsed = std.json.parseFromSlice(RequestBody, state.allocator, body, .{ .ignore_unknown_fields = true }) catch {
             const err_response = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n{\"error\": \"Invalid JSON format\"}";
             _ = try stream.writeAll(err_response);
@@ -228,6 +252,8 @@ fn handleConnection(state: *ServerState, stream: std.net.Stream, config: *const 
         defer parsed.deinit();
 
         const prompt = parsed.value.prompt;
+        const top_k = parsed.value.top_k orelse 0;
+        const top_p = parsed.value.top_p orelse 0.0;
 
         // Validate prompt length
         if (prompt.len == 0) {
@@ -248,7 +274,15 @@ fn handleConnection(state: *ServerState, stream: std.net.Stream, config: *const 
 
         // Run prediction (locked)
         state.mutex.lock();
-        const result = state.model.predict(formatted_input) catch |err| {
+        const result = blk: {
+            if (top_k > 0) {
+                break :blk state.model.predictWithSampling(formatted_input, .topk, top_k, 0.0);
+            } else if (top_p > 0.0) {
+                break :blk state.model.predictWithSampling(formatted_input, .topp, 0, top_p);
+            } else {
+                break :blk state.model.predict(formatted_input);
+            }
+        } catch |err| {
             state.mutex.unlock();
             std.debug.print("[{}] Prediction error: {}\n", .{ std.time.timestamp(), err });
             const err_response = "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\n\r\n{\"error\": \"Model prediction failed\"}";
@@ -259,10 +293,26 @@ fn handleConnection(state: *ServerState, stream: std.net.Stream, config: *const 
         defer state.allocator.free(result);
 
         // JSON response - manually format to avoid API issues
-        const response_json = try std.fmt.allocPrint(state.allocator, "{{\"response\": \"{s}\"}}", .{result});
-        defer state.allocator.free(response_json);
+        // Escape quotes and newlines in result for valid JSON
+        // Simple escaping for now (better to use std.json.stringify but we need allocPrint)
+        // JSON response - manually format to avoid API issues
+        // Simple escaping for quotes and backslashes
+        var json_response = std.ArrayList(u8){};
+        defer json_response.deinit(state.allocator);
+        try json_response.appendSlice(state.allocator, "{\"response\": \"");
+        for (result) |c| {
+            switch (c) {
+                '"' => try json_response.appendSlice(state.allocator, "\\\""),
+                '\\' => try json_response.appendSlice(state.allocator, "\\\\"),
+                '\n' => try json_response.appendSlice(state.allocator, "\\n"),
+                '\r' => try json_response.appendSlice(state.allocator, "\\r"),
+                '\t' => try json_response.appendSlice(state.allocator, "\\t"),
+                else => try json_response.append(state.allocator, c),
+            }
+        }
+        try json_response.appendSlice(state.allocator, "\"}");
 
-        const response = try std.fmt.allocPrint(state.allocator, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{s}", .{ response_json.len, response_json });
+        const response = try std.fmt.allocPrint(state.allocator, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{s}", .{ json_response.items.len, json_response.items });
         defer state.allocator.free(response);
         _ = try stream.writeAll(response);
         return;
