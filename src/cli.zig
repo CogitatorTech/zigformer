@@ -189,8 +189,8 @@ fn trainAndMaybeRepl(allocator: std.mem.Allocator, pretrain_path: []const u8, ch
     std.debug.print("Output: {s}\n", .{prediction_before});
 
     const pretraining_data = pretrain.parsed.value;
-    std.debug.print("\n=== PRE-TRAINING MODEL ===\n", .{});
-    std.debug.print("Pre-training on {} examples for {} epochs with learning rate {}\n", .{ pretraining_data.len, pre_epochs, pre_lr });
+    std.debug.print("\n=== PRETRAINING MODEL ===\n", .{});
+    std.debug.print("Pretraining on {} examples for {} epochs with learning rate {}\n", .{ pretraining_data.len, pre_epochs, pre_lr });
     try model.train(pretraining_data, pre_epochs, pre_lr, batch_size, accumulation_steps);
 
     const chat_training_data = chat.parsed.value;
@@ -428,7 +428,7 @@ pub fn main() anyerror!void {
     });
     try root_cmd.addFlag(.{
         .name = "load-model",
-        .description = "Path to load a pre-trained model checkpoint",
+        .description = "Path to load a pretrained model checkpoint",
         .type = .String,
         .default_value = .{ .String = "" },
     });

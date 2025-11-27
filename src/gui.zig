@@ -458,7 +458,7 @@ pub fn main() !void {
     });
     try cmd.addFlag(.{
         .name = "load-model",
-        .description = "Path to load a pre-trained model checkpoint",
+        .description = "Path to load a pretrained model checkpoint",
         .type = .String,
         .default_value = .{ .String = "" },
     });

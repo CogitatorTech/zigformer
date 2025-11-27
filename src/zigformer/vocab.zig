@@ -124,10 +124,8 @@ pub const Vocab = struct {
     }
 
     /// Split text into raw token strings (words and punctuation).
-    /// Caller owns the returned ArrayList and its contents (if duplicated).
-    /// However, this function returns slices of the input `text` to avoid allocation where possible.
-    /// But wait, splitText in cli.zig duplicated? No, it appended slices.
-    /// Let's return slices of `text`.
+    /// Caller owns the returned ArrayList and its contents.
+    /// This function returns slices of the input `text` to avoid allocation where possible.
     pub fn tokenizeRaw(allocator: std.mem.Allocator, text: []const u8) !std.ArrayList([]const u8) {
         var list = std.ArrayList([]const u8){};
         errdefer list.deinit(allocator);

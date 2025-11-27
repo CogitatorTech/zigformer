@@ -7,8 +7,8 @@
     <title>ZigFormer AI</title>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-    <link rel="stylesheet"
-        href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/atom-one-dark.min.css"
+        rel="stylesheet">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
     <style>
         :root {
@@ -195,7 +195,7 @@
         }
 
         .avatar {
-            width: 32px;
+            width: 36px;
             height: 32px;
             border-radius: 6px;
             display: flex;
@@ -373,37 +373,37 @@
 
             <div class="control">
                 <label>
-                    Top-K
-                    <span id="top-k-val" class="value-display">0</span>
+                    Top-k
+                    <span class="value-display" id="top-k-val">0</span>
                 </label>
-                <input type="range" id="top-k" min="0" max="50" value="0" step="1">
+                <input id="top-k" max="50" min="0" step="1" type="range" value="0">
             </div>
 
             <div class="control">
                 <label>
-                    Top-P
-                    <span id="top-p-val" class="value-display">0.0</span>
+                    Top-k
+                    <span class="value-display" id="top-p-val">0.0</span>
                 </label>
-                <input type="range" id="top-p" min="0" max="1" value="0" step="0.05">
+                <input id="top-p" max="1" min="0" step="0.05" type="range" value="0">
             </div>
         </div>
 
         <div class="settings-group">
             <div class="settings-title">Model Stats</div>
             <div class="control">
-                <label>Vocab Size: <span id="stat-vocab" class="value-display">-</span></label>
+                <label>Vocab Size: <span class="value-display" id="stat-vocab">-</span></label>
             </div>
             <div class="control">
-                <label>Embed Dim: <span id="stat-embed" class="value-display">-</span></label>
+                <label>Embed Dim: <span class="value-display" id="stat-embed">-</span></label>
             </div>
             <div class="control">
-                <label>Hidden Dim: <span id="stat-hidden" class="value-display">-</span></label>
+                <label>Hidden Dim: <span class="value-display" id="stat-hidden">-</span></label>
             </div>
             <div class="control">
-                <label>Max Seq: <span id="stat-seq" class="value-display">-</span></label>
+                <label>Max Seq: <span class="value-display" id="stat-seq">-</span></label>
             </div>
             <div class="control">
-                <label>Heads: <span id="stat-heads" class="value-display">-</span></label>
+                <label>Heads: <span class="value-display" id="stat-heads">-</span></label>
             </div>
         </div>
 
@@ -417,7 +417,8 @@
             <div class="message">
                 <div class="avatar bot-avatar">ZF</div>
                 <div class="message-content">
-                    <p>Hi! I am ZigFormer, an AI like ChatGPT. I can help you with questions, code, and more.
+                    <p>Hi! I am ZigFormer, a Transformer-based Language Model. I can help you with questions, code, and
+                        more.
                         (Try adjusting the sampling parameters in the sidebar to control my creativity!)</p>
                 </div>
             </div>
@@ -425,7 +426,7 @@
 
         <div id="input-area">
             <div class="input-wrapper">
-                <textarea id="prompt-input" placeholder="Type in to chat with ZigFormer" rows="1"></textarea>
+                <textarea id="prompt-input" placeholder="Type to chat with ZigFormer" rows="1"></textarea>
                 <button id="send-btn">
                     <svg viewBox="0 0 24 24">
                         <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"></path>
@@ -436,107 +437,127 @@
     </div>
 
     <script>
-        // Theme Logic
-        const themeBtn = document.getElementById('theme-btn');
-        const html = document.documentElement;
+    // Theme Logic
+    const themeBtn = document.getElementById('theme-btn');
+    const html = document.documentElement;
 
-        // Load saved theme
-        const savedTheme = localStorage.getItem('theme') || 'dark';
-        html.setAttribute('data-theme', savedTheme);
+    // Load saved theme
+    const savedTheme = localStorage.getItem('theme') || 'dark';
+    html.setAttribute('data-theme', savedTheme);
 
-        themeBtn.addEventListener('click', () => {
-            const current = html.getAttribute('data-theme');
-            const next = current === 'dark' ? 'light' : 'dark';
-            html.setAttribute('data-theme', next);
-            localStorage.setItem('theme', next);
-        });
+    themeBtn.addEventListener('click', () => {
+        const current = html.getAttribute('data-theme');
+        const next = current === 'dark' ? 'light' : 'dark';
+        html.setAttribute('data-theme', next);
+        localStorage.setItem('theme', next);
+    });
 
-        // Load Stats
-        async function loadStats() {
-            try {
-                const res = await fetch('/stats');
-                const data = await res.json();
-                document.getElementById('stat-vocab').textContent = data.vocab_size;
-                document.getElementById('stat-embed').textContent = data.embedding_dim;
-                document.getElementById('stat-hidden').textContent = data.hidden_dim;
-                document.getElementById('stat-seq').textContent = data.max_seq_len;
-                document.getElementById('stat-heads').textContent = data.num_heads;
-            } catch (e) {
-                console.error("Failed to load stats", e);
-            }
+    // Load Stats
+    async function loadStats() {
+        try {
+            const res = await fetch('/stats');
+            const data = await res.json();
+            document.getElementById('stat-vocab').textContent = data.vocab_size;
+            document.getElementById('stat-embed').textContent = data.embedding_dim;
+            document.getElementById('stat-hidden').textContent = data.hidden_dim;
+            document.getElementById('stat-seq').textContent = data.max_seq_len;
+            document.getElementById('stat-heads').textContent = data.num_heads;
+        } catch (e) {
+            console.error("Failed to load stats", e);
         }
-        loadStats();
+    }
 
-        // Setup Markdown
-        marked.setOptions({
-            highlight: function (code, lang) {
-                if (lang && hljs.getLanguage(lang)) {
-                    return hljs.highlight(code, { language: lang }).value;
-                }
-                return hljs.highlightAuto(code).value;
-            },
-            breaks: true
-        });
+    loadStats();
 
-        // UI Elements
-        const chatContainer = document.getElementById('chat-container');
-        const promptInput = document.getElementById('prompt-input');
-        const sendBtn = document.getElementById('send-btn');
-        const topKInput = document.getElementById('top-k');
-        const topPInput = document.getElementById('top-p');
-        const topKVal = document.getElementById('top-k-val');
-        const topPVal = document.getElementById('top-p-val');
-
-        // Update slider values
-        topKInput.addEventListener('input', (e) => topKVal.textContent = e.target.value);
-        topPInput.addEventListener('input', (e) => topPVal.textContent = e.target.value);
-
-        // Auto-resize textarea
-        promptInput.addEventListener('input', function () {
-            this.style.height = 'auto';
-            this.style.height = (this.scrollHeight) + 'px';
-            if (this.value === '') this.style.height = '56px';
-        });
-
-        function addMessage(text, isUser) {
-            const msgDiv = document.createElement('div');
-            msgDiv.className = 'message';
-
-            const avatar = document.createElement('div');
-            avatar.className = `avatar ${isUser ? 'user-avatar' : 'bot-avatar'}`;
-            avatar.textContent = isUser ? 'You' : 'ZF';
-
-            const content = document.createElement('div');
-            content.className = 'message-content';
-
-            if (isUser) {
-                content.textContent = text;
-            } else {
-                content.innerHTML = marked.parse(text);
+    // Setup Markdown
+    marked.setOptions({
+        highlight: function (code, lang) {
+            if (lang && hljs.getLanguage(lang)) {
+                return hljs.highlight(code, {language: lang}).value;
             }
+            return hljs.highlightAuto(code).value;
+        },
+        breaks: true
+    });
 
-            msgDiv.appendChild(avatar);
-            msgDiv.appendChild(content);
-            chatContainer.appendChild(msgDiv);
+    // UI Elements
+    const chatContainer = document.getElementById('chat-container');
+    const promptInput = document.getElementById('prompt-input');
+    const sendBtn = document.getElementById('send-btn');
+    const topKInput = document.getElementById('top-k');
+    const topPInput = document.getElementById('top-p');
+    const topKVal = document.getElementById('top-k-val');
+    const topPVal = document.getElementById('top-p-val');
 
-            // Scroll to bottom
-            chatContainer.scrollTop = chatContainer.scrollHeight;
+    // Update slider values
+    topKInput.addEventListener('input', (e) => {
+        topKVal.textContent = e.target.value;
+        localStorage.setItem('top_k', e.target.value);
+    });
+    topPInput.addEventListener('input', (e) => {
+        topPVal.textContent = e.target.value;
+        localStorage.setItem('top_p', e.target.value);
+    });
+
+    // Load saved slider values
+    const savedTopK = localStorage.getItem('top_k');
+    if (savedTopK) {
+        topKInput.value = savedTopK;
+        topKVal.textContent = savedTopK;
+    }
+
+    const savedTopP = localStorage.getItem('top_p');
+    if (savedTopP) {
+        topPInput.value = savedTopP;
+        topPVal.textContent = savedTopP;
+    }
+
+    // Auto-resize textarea
+    promptInput.addEventListener('input', function () {
+        this.style.height = 'auto';
+        this.style.height = (this.scrollHeight) + 'px';
+        if (this.value === '') this.style.height = '56px';
+    });
+
+    function addMessage(text, isUser) {
+        const msgDiv = document.createElement('div');
+        msgDiv.className = 'message';
+
+        const avatar = document.createElement('div');
+        avatar.className = `avatar ${isUser ? 'user-avatar' : 'bot-avatar'}`;
+        avatar.textContent = isUser ? 'User' : 'ZF';
+
+        const content = document.createElement('div');
+        content.className = 'message-content';
+
+        if (isUser) {
+            content.textContent = text;
+        } else {
+            content.innerHTML = marked.parse(text);
         }
 
-        async function sendMessage() {
-            const text = promptInput.value.trim();
-            if (!text) return;
+        msgDiv.appendChild(avatar);
+        msgDiv.appendChild(content);
+        chatContainer.appendChild(msgDiv);
 
-            addMessage(text, true);
-            promptInput.value = '';
-            promptInput.style.height = '56px';
-            promptInput.disabled = true;
-            sendBtn.disabled = true;
+        // Scroll to bottom
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
 
-            // Loading indicator
-            const loadingDiv = document.createElement('div');
-            loadingDiv.className = 'message';
-            loadingDiv.innerHTML = `
+    async function sendMessage() {
+        const text = promptInput.value.trim();
+        if (!text) return;
+
+        addMessage(text, true);
+        promptInput.value = '';
+        promptInput.style.height = '56px';
+        promptInput.disabled = true;
+        sendBtn.disabled = true;
+
+        // Loading indicator
+        const loadingDiv = document.createElement('div');
+        loadingDiv.className = 'message';
+        loadingDiv.innerHTML = `
                 <div class="avatar bot-avatar">ZF</div>
                 <div class="message-content">
                     <div class="loading-dots">
@@ -546,47 +567,47 @@
                     </div>
                 </div>
             `;
-            chatContainer.appendChild(loadingDiv);
-            chatContainer.scrollTop = chatContainer.scrollHeight;
+        chatContainer.appendChild(loadingDiv);
+        chatContainer.scrollTop = chatContainer.scrollHeight;
 
-            try {
-                const response = await fetch('/chat', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        prompt: text,
-                        top_k: parseInt(topKInput.value),
-                        top_p: parseFloat(topPInput.value)
-                    })
-                });
+        try {
+            const response = await fetch('/chat', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    prompt: text,
+                    top_k: parseInt(topKInput.value),
+                    top_p: parseFloat(topPInput.value)
+                })
+            });
 
-                const data = await response.json();
+            const data = await response.json();
 
-                chatContainer.removeChild(loadingDiv);
+            chatContainer.removeChild(loadingDiv);
 
-                if (data.error) {
-                    addMessage("Error: " + data.error, false);
-                } else {
-                    addMessage(data.response, false);
-                }
-            } catch (e) {
-                chatContainer.removeChild(loadingDiv);
-                addMessage("Error: Failed to connect to server.", false);
-                console.error(e);
+            if (data.error) {
+                addMessage("Error: " + data.error, false);
+            } else {
+                addMessage(data.response, false);
             }
-
-            promptInput.disabled = false;
-            sendBtn.disabled = false;
-            promptInput.focus();
+        } catch (e) {
+            chatContainer.removeChild(loadingDiv);
+            addMessage("Error: Failed to connect to server.", false);
+            console.error(e);
         }
 
-        sendBtn.addEventListener('click', sendMessage);
-        promptInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
-            }
-        });
+        promptInput.disabled = false;
+        sendBtn.disabled = false;
+        promptInput.focus();
+    }
+
+    sendBtn.addEventListener('click', sendMessage);
+    promptInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
+        }
+    });
     </script>
 </body>
 

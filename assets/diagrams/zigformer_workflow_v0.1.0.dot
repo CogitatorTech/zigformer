@@ -26,7 +26,7 @@ digraph ZigFormerWorkflow {
     ]
 
     subgraph cluster_prep {
-    label = "1. Preparation"
+    label = "1. Preprocessing"
     style = "dashed"
     color = "lightgrey"
     margin = 8

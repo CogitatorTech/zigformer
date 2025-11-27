@@ -20,7 +20,7 @@ This document outlines the features implemented in ZigFormer and the future goal
 - [x] Optimizer (Adam)
 - [x] Gradient clipping
 - [x] Cross-entropy loss
-- [x] Training loop (pre-training and fine-tuning)
+- [x] Training loop (pretraining and fine-tuning)
 - [x] Learning rate scheduling
 - [x] Model checkpointing (save and load)
 - [x] Mini-batch training
@@ -49,3 +49,7 @@ This document outlines the features implemented in ZigFormer and the future goal
 - [x] Model loading from a checkpoint
 - [x] Configuration file
 - [x] Improved error handling and validation
+- [x] Markdown rendering and syntax highlighting
+- [x] Interactive sampling controls (Top-k and Top-p)
+- [x] Dark and light mode toggle
+- [x] Model statistics display

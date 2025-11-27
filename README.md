@@ -27,6 +27,9 @@ and [nanochat](https://github.com/karpathy/nanochat) projects, and follows the a
 ["Attention Is All You Need"](https://arxiv.org/abs/1706.03762) and
 ["Language Models are Unsupervised Multitask Learners"](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf)
 papers.
+It can be used as a [Zig library](https://CogitatorTech.github.io/zigformer/) for building LLMs or as a
+[standalone application](https://github.com/CogitatorTech/zigformer/releases)
+for training, inference, and chatting with the model.
 
 The diagrams below show the high-level architecture and its core components.
 
@@ -40,7 +43,7 @@ The diagrams below show the high-level architecture and its core components.
 - Supports both pretraining and instruction fine-tuning
 - Provides multiple decoding strategies (like greedy and beam search)
 - Includes a CLI for training and inference
-- Has a web-based UI for interactive chatting with the model
+- Has a web-based UI for chatting with the model
 - Supports model checkpointing and the use of configuration files
 
 See the [ROADMAP.md](ROADMAP.md) for the list of implemented and planned features.
@@ -77,8 +80,8 @@ This will:
 
 1. Load the training datasets from `datasets/simple_dataset/`
 2. Build a vocabulary of tokens from the data
-3. Pre-train the model on the pretraining examples (raw text)
-4. Fine-tune the model on the instruction-following examples (question-answer pairs)
+3. Pretrain the model on the pretraining examples (raw text)
+4. Train (or fine-tune) the model on question-answer pairs
 5. Save the trained model to `model.bin`
 
 Training parameters can be given through a configuration file or CLI arguments.
@@ -115,7 +118,7 @@ You can run the web-based UI to chat with the trained model:
 zig build run-gui -- --load-model model.bin
 ```
 
-The UI can be accessed at http://localhost:8085 by default.
+The UI can be accessed at `http://localhost:8085` by default.
 
 You can also provide a configuration file for the UI:
 
@@ -149,22 +152,26 @@ zig build run-gui -- --help
 #### Example Usage
 
 ```bash
-# Make sure to train the model first
+# Train the model (using the default dataset and save the weights to 'model.bin')
 zig build run -- --save-model model.bin
 ```
 
 ```bash
-# Inference with greedy decoding
+# Generate coherent text (using Beam search with beam width of 5)
 zig build run -- predict --prompt "How do mountains form?" --beam-width 5
 ```
 
 ```bash
+# Generate more diverse text (using top-k sampling with k=5)
 zig build run -- predict --prompt "How do mountains form?" --top-k 5 --load-model model.bin
 ```
 
 ```bash
+# Launch the web UI server and chat with the trained model on http://localhost:8085
 zig build run-gui -- --load-model model.bin
 ```
+
+![ZigFormer Web UI](assets/screenshots/zigformer_webui_v0.1.0.jpeg)
 
 ---
 

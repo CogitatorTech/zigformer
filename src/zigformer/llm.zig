@@ -25,7 +25,7 @@
 //!
 //! Inference:
 //!   - Greedy decoding: argmax at each step
-//!   - Top-k/top-p sampling: sample from filtered distribution
+//!   - Top-k and top-p sampling: sample from filtered distribution
 //!   - Beam search: maintain k best sequences
 
 const std = @import("std");
