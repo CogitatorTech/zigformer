@@ -171,7 +171,7 @@ zig build run -- predict --prompt "How do mountains form?" --top-k 5 --load-mode
 zig build run-gui -- --load-model model.bin
 ```
 
-![ZigFormer Web UI](assets/screenshots/zigformer_webui_v0.1.0.jpeg)
+![ZigFormer Web UI](assets/screenshots/zigformer_webui_v0.1.1.jpeg)
 
 ---
 

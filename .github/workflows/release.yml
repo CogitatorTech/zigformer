@@ -75,27 +75,27 @@ jobs:
         include:
           - os: ubuntu-latest
             target: x86_64-linux-gnu
-            artifact_name: zigformer-cli-linux-x86_64.zip
+            artifact_name: zigformer-linux-x86_64.zip
             asset_content_type: application/zip
           - os: ubuntu-latest
             target: aarch64-linux-gnu
-            artifact_name: zigformer-cli-linux-aarch64.zip
+            artifact_name: zigformer-linux-aarch64.zip
             asset_content_type: application/zip
           - os: macos-latest
             target: aarch64-macos # Apple Silicon (ARM64)
-            artifact_name: zigformer-cli-macos-aarch64.zip
+            artifact_name: zigformer-macos-aarch64.zip
             asset_content_type: application/zip
           - os: macos-latest
             target: x86_64-macos # Intel
-            artifact_name: zigformer-cli-macos-x86_64.zip
+            artifact_name: zigformer-macos-x86_64.zip
             asset_content_type: application/zip
           - os: windows-latest
             target: x86_64-windows-msvc
-            artifact_name: zigformer-cli-windows-x86_64.zip
+            artifact_name: zigformer-windows-x86_64.zip
             asset_content_type: application/zip
           - os: windows-latest
             target: aarch64-windows-msvc
-            artifact_name: zigformer-cli-windows-aarch64.zip
+            artifact_name: zigformer-windows-aarch64.zip
             asset_content_type: application/zip
 
     steps:
@@ -120,12 +120,22 @@ jobs:
             ls -l zig-out/bin || true
             exit 1
           fi
+          if [ ! -f zig-out/bin/zigformer-gui ]; then
+            echo "ERROR: built binary zig-out/bin/zigformer-gui not found"
+            ls -l zig-out/bin || true
+            exit 1
+          fi
 
       - name: Verify built binary exists (Windows)
         if: runner.os == 'Windows'
         run: |
           if (!(Test-Path "zig-out\\bin\\zigformer-cli.exe")) {
             Write-Host 'ERROR: built binary zig-out\\bin\\zigformer-cli.exe not found'
+            dir zig-out\\bin
+            exit 1
+          }
+          if (!(Test-Path "zig-out\\bin\\zigformer-gui.exe")) {
+            Write-Host 'ERROR: built binary zig-out\\bin\\zigformer-gui.exe not found'
             dir zig-out\\bin
             exit 1
           }
@@ -136,6 +146,7 @@ jobs:
           RELEASE_DIR="release-${{ matrix.target }}-${{ github.run_id }}"
           mkdir -p "$RELEASE_DIR"
           mv zig-out/bin/zigformer-cli "$RELEASE_DIR"/
+          mv zig-out/bin/zigformer-gui "$RELEASE_DIR"/
           # Create a zip of the release contents (avoid nesting an extra top-level directory)
           (cd "$RELEASE_DIR" && zip -r "../${{ matrix.artifact_name }}" .)
 
@@ -145,6 +156,7 @@ jobs:
           $env:RELEASE_DIR = "release-${{ matrix.target }}-${{ github.run_id }}"
           New-Item -ItemType Directory -Path $env:RELEASE_DIR -Force | Out-Null
           Move-Item zig-out\bin\zigformer-cli.exe $env:RELEASE_DIR\
+          Move-Item zig-out\bin\zigformer-gui.exe $env:RELEASE_DIR\
           Compress-Archive -Path "$env:RELEASE_DIR\*" -DestinationPath ${{ matrix.artifact_name }}
 
       - name: Upload Release Asset
