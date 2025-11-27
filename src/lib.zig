@@ -1,6 +1,6 @@
 //! ## ZigFormer
 //!
-//! ZigFormer is an implementation of a transformer-based language model (like GPT-2)
+//! ZigFormer is an implementation of a transformer-based language model (LLM)
 //! written in pure Zig. It provides a framework for understanding and experimenting with
 //! transformer architectures.
 //!
@@ -40,7 +40,7 @@
 //! - `self_attention`: Multi-head self-attention mechanism
 //! - `feed_forward`: Position-wise feed-forward networks
 //! - `layer_norm`: Layer normalization
-//! - `transformer`: Transformer block (attention and FFN)
+//! - `transformer`: Transformer block (feed-forward and attention layers)
 //! - `output_projection`: Output layer for vocabulary prediction
 //! - `llm`: Language model implementation with training and inference API
 //! - `optimizer`: Adam optimizer

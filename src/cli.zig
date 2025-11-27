@@ -216,7 +216,7 @@ fn trainAndMaybeRepl(allocator: std.mem.Allocator, pretrain_path: []const u8, ch
     std.debug.print("Type a prompt and press Enter to generate text.\n", .{});
     std.debug.print("Type 'exit' to quit.\n", .{});
 
-    const stdin_file = std.fs.File{ .handle = std.posix.STDIN_FILENO };
+    const stdin_file = std.fs.File.stdin();
     const stdin = stdin_file.deprecatedReader();
     var buffer: [1024]u8 = undefined;
     while (true) {
@@ -244,33 +244,6 @@ fn execRoot(ctx: chilli.CommandContext) !void {
     const config_path = try ctx.getFlag("config", []const u8);
     var config = if (config_path.len > 0) try loadConfig(allocator, config_path) else Config{};
     defer config.deinit(allocator);
-
-    // Override with CLI flags if provided (checking if they are different from defaults is tricky with chilli,
-    // so we'll assume CLI flags take precedence if they are set to non-default values or if we just use them directly.
-    // Actually, a better approach is: use config as base, then overwrite with CLI flags.
-    // But chilli returns defaults if flag is missing.
-    // So we need to know if flag was actually passed. Chilli doesn't easily expose this.
-    // For now, let's just use CLI flags if config is NOT present, OR if we want to support overrides,
-    // we have to accept that CLI defaults might overwrite config values.
-    // To solve this properly:
-    // 1. Load config
-    // 2. For each field, check if CLI flag was passed (not easy with current chilli usage).
-    // Alternative: We only use config if --config is passed, and ignore other flags? No, overrides are good.
-    // Let's assume: Config file sets defaults. CLI flags override.
-    // But chilli returns default values if flag is missing.
-    // So if config has batch_size=64, and CLI default is 32, and user runs without --batch-size, chilli returns 32.
-    // If we overwrite config with 32, we lose the config value.
-    // We need to check if the flag was present.
-    // Since we can't easily do that, let's prioritize CLI flags ONLY if they are explicitly different from our hardcoded defaults?
-    // Or simpler: If --config is passed, we use it. We can manually parse args to see if flags are present, but that's messy.
-
-    // Let's stick to the plan: Config file sets values. CLI flags override.
-    // If we want CLI to override, we need to know if user typed it.
-    // Given the constraints, let's do this:
-    // If --config is present, use it.
-    // AND we will NOT read other flags if --config is present, to avoid confusion.
-    // OR we can say: CLI flags are ignored if --config is present, EXCEPT for interactive/save-model maybe?
-    // Let's go with: If --config is present, it is the source of truth.
 
     if (config_path.len > 0) {
         std.debug.print("Loaded configuration from {s}\n", .{config_path});
@@ -361,7 +334,7 @@ pub fn main() anyerror!void {
     var root_cmd = try chilli.Command.init(allocator, .{
         .name = "zigformer-cli",
         .description = "An educational transformer-based LLM in Zig",
-        .version = "v0.1.0",
+        .version = "v0.1.1",
         .exec = execRoot,
     });
     defer root_cmd.deinit();

@@ -635,13 +635,6 @@ test "SelfAttention Causal Masking with Cache" {
     var output = try attn.forward(input, true);
     defer output.deinit();
 
-    // Check cached_attention_scores
-    // Should be (num_heads * seq_len) x seq_len
-    // For each head, the 4x4 score matrix should be lower triangular (masked).
-    // scores[i, j] should be -inf (or very small after softmax, but we check pre-softmax scores if possible?
-    // Wait, cached_attention_scores stores POST-softmax scores.
-    // So masked values should be 0.0.
-
     const scores = attn.cached_attention_scores;
     // Rows: num_heads * seq_len
     // Cols: seq_len (since cache_len = seq_len after first pass)
