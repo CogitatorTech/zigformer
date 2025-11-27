@@ -421,7 +421,7 @@ pub fn main() !void {
     var cmd = try chilli.Command.init(allocator, .{
         .name = "zigformer-gui",
         .description = "Web GUI for ZigFormer",
-        .version = "0.1.0",
+        .version = "0.1.1",
         .exec = execGui,
     });
     defer cmd.deinit();

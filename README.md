@@ -28,7 +28,7 @@ and [nanochat](https://github.com/karpathy/nanochat) projects, and follows the a
 ["Language Models are Unsupervised Multitask Learners"](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf)
 papers.
 It can be used as a [Zig library](https://CogitatorTech.github.io/zigformer/) for building LLMs or as a
-[standalone application](https://github.com/CogitatorTech/zigformer/releases)
+[standalone application](https://github.com/CogitatorTech/zigformer/releases/latest)
 for training, inference, and chatting with the model.
 
 The diagrams below show the high-level architecture and its core components.
