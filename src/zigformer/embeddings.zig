@@ -37,6 +37,7 @@ pub const Embeddings = struct {
     token_optimizer: Adam,
     positional_optimizer: Adam,
     batch_size: usize,
+    position_offset: usize,
 
     pub fn init(allocator: std.mem.Allocator, vocab_size: usize) !*Embeddings {
         const self = try allocator.create(Embeddings);
@@ -49,6 +50,7 @@ pub const Embeddings = struct {
             .token_optimizer = try Adam.init(allocator, vocab_size, lib.config.embedding_dim),
             .positional_optimizer = try Adam.init(allocator, lib.config.max_seq_len, lib.config.embedding_dim),
             .batch_size = 1,
+            .position_offset = 0,
         };
         return self;
     }
@@ -66,7 +68,21 @@ pub const Embeddings = struct {
         self.batch_size = batch_size;
     }
 
-    pub fn forward(self: *Embeddings, input: Matrix) !Matrix {
+    pub fn resetCache(self: *Embeddings) void {
+        self.position_offset = 0;
+    }
+
+    pub fn setAccumulationSteps(self: *Embeddings, steps: usize) void {
+        self.token_optimizer.setAccumulationSteps(steps);
+        self.positional_optimizer.setAccumulationSteps(steps);
+    }
+
+    pub fn applyAccumulated(self: *Embeddings, lr: f32) void {
+        self.token_optimizer.applyAccumulated(&self.token_embeddings, lr);
+        self.positional_optimizer.applyAccumulated(&self.positional_embeddings, lr);
+    }
+
+    pub fn forward(self: *Embeddings, input: Matrix, use_cache: bool) !Matrix {
         if (self.has_cached_input) self.cached_input.deinit();
         self.cached_input = try input.clone();
         self.has_cached_input = true;
@@ -83,8 +99,10 @@ pub const Embeddings = struct {
         }
 
         var pos_embeds = try Matrix.initZeros(self.allocator, total_tokens, lib.config.embedding_dim);
-        const clamped_seq_len = @min(seq_len, lib.config.max_seq_len);
-        const pos_data = self.positional_embeddings.data[0 .. clamped_seq_len * lib.config.embedding_dim];
+        const position_offset = if (use_cache) self.position_offset else 0;
+        if (position_offset + seq_len > lib.config.max_seq_len) return error.SequenceTooLong;
+        const clamped_seq_len = seq_len;
+        const pos_data = self.positional_embeddings.data[position_offset * lib.config.embedding_dim .. (position_offset + clamped_seq_len) * lib.config.embedding_dim];
 
         for (0..self.batch_size) |b| {
             const start_row = b * seq_len;
@@ -95,6 +113,7 @@ pub const Embeddings = struct {
         const result = try token_embeds.add(&pos_embeds);
         token_embeds.deinit();
         pos_embeds.deinit();
+        if (use_cache) self.position_offset += seq_len;
         return result;
     }
 
@@ -161,6 +180,7 @@ pub const Embeddings = struct {
             .token_optimizer = try Adam.init(allocator, token_embeddings.rows, token_embeddings.cols),
             .positional_optimizer = try Adam.init(allocator, positional_embeddings.rows, positional_embeddings.cols),
             .batch_size = 1,
+            .position_offset = 0,
         };
         return self;
     }
@@ -186,7 +206,7 @@ test "Embeddings Batching" {
     for (input.data) |*val| val.* = 1.0; // Token ID 1
 
     // Forward
-    var output = try embeddings.forward(input);
+    var output = try embeddings.forward(input, false);
     defer output.deinit();
 
     try std.testing.expectEqual(total_tokens, output.rows);

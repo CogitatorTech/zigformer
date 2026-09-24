@@ -101,6 +101,16 @@ pub const OutputProjection = struct {
         return self.w_out.data.len + self.b_out.data.len;
     }
 
+    pub fn setAccumulationSteps(self: *OutputProjection, steps: usize) void {
+        self.optimizer_w.setAccumulationSteps(steps);
+        self.optimizer_b.setAccumulationSteps(steps);
+    }
+
+    pub fn applyAccumulated(self: *OutputProjection, lr: f32) void {
+        self.optimizer_w.applyAccumulated(&self.w_out, lr);
+        self.optimizer_b.applyAccumulated(&self.b_out, lr);
+    }
+
     pub fn toLayer(self: *OutputProjection) layer.Layer {
         return layer.toLayer(OutputProjection)(self);
     }

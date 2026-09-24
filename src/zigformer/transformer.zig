@@ -108,6 +108,20 @@ pub const TransformerBlock = struct {
         self.attention.batch_size = batch_size;
     }
 
+    pub fn setAccumulationSteps(self: *TransformerBlock, steps: usize) void {
+        self.attention.setAccumulationSteps(steps);
+        self.feed_forward.setAccumulationSteps(steps);
+        self.norm1.setAccumulationSteps(steps);
+        self.norm2.setAccumulationSteps(steps);
+    }
+
+    pub fn applyAccumulated(self: *TransformerBlock, lr: f32) void {
+        self.attention.applyAccumulated(lr);
+        self.feed_forward.applyAccumulated(lr);
+        self.norm1.applyAccumulated(lr);
+        self.norm2.applyAccumulated(lr);
+    }
+
     pub fn resetCache(self: *TransformerBlock) void {
         self.attention.resetCache();
     }

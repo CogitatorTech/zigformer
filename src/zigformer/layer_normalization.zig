@@ -187,6 +187,16 @@ pub const LayerNorm = struct {
         return self.gamma.data.len + self.beta.data.len;
     }
 
+    pub fn setAccumulationSteps(self: *LayerNorm, steps: usize) void {
+        self.optimizer_gamma.setAccumulationSteps(steps);
+        self.optimizer_beta.setAccumulationSteps(steps);
+    }
+
+    pub fn applyAccumulated(self: *LayerNorm, lr: f32) void {
+        self.optimizer_gamma.applyAccumulated(&self.gamma, lr);
+        self.optimizer_beta.applyAccumulated(&self.beta, lr);
+    }
+
     pub fn toLayer(self: *LayerNorm) layer.Layer {
         return layer.toLayer(LayerNorm)(self);
     }

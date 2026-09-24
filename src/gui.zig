@@ -163,21 +163,66 @@ fn validateConfig(config: Config) !void {
     }
 }
 
-fn handleConnection(state: *ServerState, stream: std.net.Stream, config: *const Config) !void {
-    var buffer: [8192]u8 = undefined;
-    const bytes_read = stream.read(&buffer) catch |err| {
-        std.debug.print("[{}] Error reading from stream: {}\n", .{ std.time.timestamp(), err });
-        return err;
-    };
+fn expectedRequestSize(request: []const u8) !?usize {
+    const header_end = std.mem.indexOf(u8, request, "\r\n\r\n") orelse return null;
+    var body_len: usize = 0;
+    var lines = std.mem.splitScalar(u8, request[0..header_end], '\n');
+    _ = lines.next();
+    while (lines.next()) |line| {
+        const header = std.mem.trim(u8, line, " \r\t");
+        const colon = std.mem.indexOfScalar(u8, header, ':') orelse continue;
+        if (std.ascii.eqlIgnoreCase(std.mem.trim(u8, header[0..colon], " \t"), "content-length")) {
+            body_len = try std.fmt.parseInt(usize, std.mem.trim(u8, header[colon + 1 ..], " \t"), 10);
+            break;
+        }
+    }
+    const total, const overflow = @addWithOverflow(header_end + 4, body_len);
+    if (overflow != 0) return error.RequestTooLarge;
+    return total;
+}
 
-    if (bytes_read == 0) return;
-    if (bytes_read > config.max_request_size) {
-        const err_response = "HTTP/1.1 413 Payload Too Large\r\nContent-Type: application/json\r\n\r\n{\"error\": \"Request too large\"}";
+fn handleConnection(state: *ServerState, stream: std.net.Stream, config: *const Config) !void {
+    var request_buffer = std.ArrayList(u8){};
+    defer request_buffer.deinit(state.allocator);
+    var chunk: [4096]u8 = undefined;
+    var expected_size: ?usize = null;
+    while (expected_size == null or request_buffer.items.len < expected_size.?) {
+        const bytes_read = stream.read(&chunk) catch |err| {
+            std.debug.print("[{}] Error reading from stream: {}\n", .{ std.time.timestamp(), err });
+            return err;
+        };
+        if (bytes_read == 0) break;
+        if (bytes_read > config.max_request_size -| request_buffer.items.len) {
+            const err_response = "HTTP/1.1 413 Payload Too Large\r\nContent-Type: application/json\r\n\r\n{\"error\": \"Request too large\"}";
+            _ = stream.writeAll(err_response) catch {};
+            return;
+        }
+        try request_buffer.appendSlice(state.allocator, chunk[0..bytes_read]);
+        expected_size = expectedRequestSize(request_buffer.items) catch {
+            const err_response = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n{\"error\": \"Invalid Content-Length\"}";
+            _ = stream.writeAll(err_response) catch {};
+            return;
+        };
+        if (expected_size) |size| {
+            if (size > config.max_request_size) {
+                const err_response = "HTTP/1.1 413 Payload Too Large\r\nContent-Type: application/json\r\n\r\n{\"error\": \"Request too large\"}";
+                _ = stream.writeAll(err_response) catch {};
+                return;
+            }
+        }
+    }
+
+    const expected = expected_size orelse {
+        const err_response = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n{\"error\": \"Malformed request\"}";
+        _ = stream.writeAll(err_response) catch {};
+        return;
+    };
+    if (request_buffer.items.len < expected) {
+        const err_response = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n{\"error\": \"Incomplete request\"}";
         _ = stream.writeAll(err_response) catch {};
         return;
     }
-
-    const request = buffer[0..bytes_read];
+    const request = request_buffer.items[0..expected];
 
     // Parse HTTP request line
     var lines = std.mem.splitScalar(u8, request, '\n');

@@ -157,6 +157,8 @@ pub const LLM = struct {
         for (raw_tokens.items) |word| {
             if (self.vocab.encode(word)) |token_id| {
                 try tokens.append(self.allocator, token_id);
+            } else {
+                return error.UnknownToken;
             }
         }
         return tokens;
@@ -650,25 +652,32 @@ pub const LLM = struct {
     }
 
     fn crossEntropyLoss(probs: *const Matrix, targets: []const u32) f32 {
-        if (targets.len == 0) return 0.0; // Avoid division by zero
+        var valid_targets: usize = 0;
         var loss: f32 = 0.0;
         for (targets, 0..) |target_id, i| {
+            if (target_id == std.math.maxInt(u32)) continue;
             const prob_target = probs.at(i, target_id);
             loss -= std.math.log(f32, std.math.e, @max(1e-15, prob_target));
+            valid_targets += 1;
         }
-        return loss / @as(f32, @floatFromInt(targets.len));
+        if (valid_targets == 0) return 0.0;
+        return loss / @as(f32, @floatFromInt(valid_targets));
     }
 
     fn computeGradients(probs: *const Matrix, targets: []const u32) !Matrix {
-        var grads = try probs.clone();
-        const batch_size: f32 = @floatFromInt(targets.len);
-        for (0..grads.rows) |r| {
-            if (r < targets.len) {
-                grads.data[r * grads.cols + targets[r]] -= 1.0;
-            }
+        var grads = try Matrix.initZeros(probs.allocator, probs.rows, probs.cols);
+        var valid_targets: usize = 0;
+        for (targets, 0..) |target_id, r| {
+            if (target_id == std.math.maxInt(u32)) continue;
+            const row_start = r * grads.cols;
+            for (0..grads.cols) |c| grads.data[row_start + c] = probs.data[row_start + c];
+            grads.data[row_start + target_id] -= 1.0;
+            valid_targets += 1;
         }
+        if (valid_targets == 0) return grads;
+        const scale: f32 = 1.0 / @as(f32, @floatFromInt(valid_targets));
         for (grads.data) |*g| {
-            g.* /= batch_size;
+            g.* *= scale;
         }
         return grads;
     }
@@ -683,11 +692,31 @@ pub const LLM = struct {
         }
     }
 
+    fn setAccumulationSteps(self: *LLM, steps: usize) void {
+        const embeddings: *Embeddings = @ptrCast(@alignCast(self.network.items[0].self));
+        embeddings.setAccumulationSteps(steps);
+        for (self.network.items[1..4]) |*layer| {
+            const block: *TransformerBlock = @ptrCast(@alignCast(layer.self));
+            block.setAccumulationSteps(steps);
+        }
+        const output: *OutputProjection = @ptrCast(@alignCast(self.network.items[4].self));
+        output.setAccumulationSteps(steps);
+    }
+
+    fn applyAccumulated(self: *LLM, lr: f32) void {
+        const embeddings: *Embeddings = @ptrCast(@alignCast(self.network.items[0].self));
+        embeddings.applyAccumulated(lr);
+        for (self.network.items[1..4]) |*layer| {
+            const block: *TransformerBlock = @ptrCast(@alignCast(layer.self));
+            block.applyAccumulated(lr);
+        }
+        const output: *OutputProjection = @ptrCast(@alignCast(self.network.items[4].self));
+        output.applyAccumulated(lr);
+    }
+
     pub fn train(self: *LLM, data: []const []const u8, epochs: usize, lr: f32, batch_size: usize, accumulation_steps: usize) !void {
         self.setBatchSize(batch_size);
-
-        // The learning rate for gradient accumulation
-        const effective_lr = lr / @as(f32, @floatFromInt(accumulation_steps));
+        self.setAccumulationSteps(accumulation_steps);
 
         var tokenized_data = std.ArrayList(std.ArrayList(u32)){};
         defer {
@@ -706,7 +735,6 @@ pub const LLM = struct {
         for (0..epochs) |epoch| {
             var total_loss: f32 = 0.0;
             var processed_batches: usize = 0;
-            var accumulation_counter: usize = 0;
 
             var i: usize = 0;
             while (i < tokenized_data.items.len) : (i += batch_size) {
@@ -751,7 +779,7 @@ pub const LLM = struct {
                             targets[global_idx] = target_ids[t];
                         } else {
                             input_matrix.data[global_idx] = 0;
-                            targets[global_idx] = 0;
+                            targets[global_idx] = std.math.maxInt(u32);
                         }
                     }
                 }
@@ -775,22 +803,16 @@ pub const LLM = struct {
 
                 var grads = try computeGradients(&probs, targets);
 
-                // Backward pass with effective learning rate
+                // Backward pass; optimizers apply once per accumulation group.
                 var layer_idx = self.network.items.len;
                 while (layer_idx > 0) {
                     layer_idx -= 1;
-                    const next_grads = try self.network.items[layer_idx].backward(grads, effective_lr);
+                    const next_grads = try self.network.items[layer_idx].backward(grads, lr);
                     grads = next_grads;
                 }
                 grads.deinit();
 
-                accumulation_counter += 1;
-
-                // Track processed batches (count every accumulation_steps batches as one effective batch)
-                if (accumulation_counter >= accumulation_steps) {
-                    processed_batches += 1;
-                    accumulation_counter = 0;
-                }
+                processed_batches += 1;
 
                 // Restore batch size if changed
                 if (current_batch_size != batch_size) {
@@ -798,8 +820,10 @@ pub const LLM = struct {
                 }
             }
 
+            self.applyAccumulated(lr);
+
             if (processed_batches > 0) {
-                std.debug.print("Epoch {}: Loss = {:.4}\n", .{ epoch, total_loss / @as(f32, @floatFromInt(processed_batches * accumulation_steps)) });
+                std.debug.print("Epoch {}: Loss = {:.4}\n", .{ epoch, total_loss / @as(f32, @floatFromInt(processed_batches)) });
             } else {
                 std.debug.print("Epoch {}: No data processed.\n", .{epoch});
             }

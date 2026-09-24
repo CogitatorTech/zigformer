@@ -173,6 +173,20 @@ pub const FeedForward = struct {
         return self.w1.data.len + self.b1.data.len + self.w2.data.len + self.b2.data.len;
     }
 
+    pub fn setAccumulationSteps(self: *FeedForward, steps: usize) void {
+        self.optimizer_w1.setAccumulationSteps(steps);
+        self.optimizer_b1.setAccumulationSteps(steps);
+        self.optimizer_w2.setAccumulationSteps(steps);
+        self.optimizer_b2.setAccumulationSteps(steps);
+    }
+
+    pub fn applyAccumulated(self: *FeedForward, lr: f32) void {
+        self.optimizer_w1.applyAccumulated(&self.w1, lr);
+        self.optimizer_b1.applyAccumulated(&self.b1, lr);
+        self.optimizer_w2.applyAccumulated(&self.w2, lr);
+        self.optimizer_b2.applyAccumulated(&self.b2, lr);
+    }
+
     pub fn toLayer(self: *FeedForward) layer.Layer {
         return layer.toLayer(FeedForward)(self);
     }
