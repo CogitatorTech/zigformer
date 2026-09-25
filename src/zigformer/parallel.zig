@@ -1,19 +1,20 @@
 //! Parallel computation utilities.
 //!
-//! Provides thread-pool based parallel execution for computationally intensive
+//! Provides threaded parallel execution for computationally intensive
 //! operations like matrix multiplication.
 
 const std = @import("std");
 const linalg = @import("linear_algebra.zig");
 const Matrix = linalg.Matrix;
 
-/// Parallel matrix multiplication using thread pool.
+/// Parallel matrix multiplication using worker threads.
 ///
 /// Splits the work across multiple threads by dividing rows of the first matrix.
 /// Falls back to sequential execution for small matrices or single thread.
 pub fn dotParallel(a: *const Matrix, b: *const Matrix, num_threads: usize) !Matrix {
     std.debug.assert(a.cols == b.rows);
     var result = try Matrix.init(a.allocator, a.rows, b.cols);
+    errdefer result.deinit();
     @memset(result.data, 0.0);
 
     if (num_threads <= 1 or a.rows < num_threads) {
@@ -30,21 +31,21 @@ pub fn dotParallel(a: *const Matrix, b: *const Matrix, num_threads: usize) !Matr
         return result;
     }
 
-    var pool: std.Thread.Pool = undefined;
-    try pool.init(.{ .allocator = a.allocator, .n_jobs = num_threads });
-    defer pool.deinit();
-
     const rows_per_thread = a.rows / num_threads;
-    var wg: std.Thread.WaitGroup = .{};
+    const threads = try a.allocator.alloc(std.Thread, num_threads);
+    defer a.allocator.free(threads);
 
+    var spawned: usize = 0;
+    errdefer for (threads[0..spawned]) |thread| thread.join();
     for (0..num_threads) |thread_id| {
         const start_row = thread_id * rows_per_thread;
         const end_row = if (thread_id == num_threads - 1) a.rows else (thread_id + 1) * rows_per_thread;
 
-        pool.spawnWg(&wg, computeRows, .{ a, b, &result, start_row, end_row });
+        threads[thread_id] = try std.Thread.spawn(.{}, computeRows, .{ a, b, &result, start_row, end_row });
+        spawned += 1;
     }
 
-    pool.waitAndWork(&wg);
+    for (threads) |thread| thread.join();
     return result;
 }
 

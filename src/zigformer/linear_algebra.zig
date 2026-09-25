@@ -179,7 +179,7 @@ pub const Matrix = struct {
                     const k = k_vec * 4;
                     const self_vec: Vec4 = self.data[i * self.cols + k ..][0..4].*;
                     var other_vec: Vec4 = undefined;
-                    for (0..4) |offset| {
+                    inline for (0..4) |offset| {
                         other_vec[offset] = other.at(k + offset, j);
                     }
                     vec_sum += self_vec * other_vec;
