@@ -9,7 +9,7 @@
 [![Tests](https://img.shields.io/github/actions/workflow/status/CogitatorTech/zigformer/tests.yml?label=tests&style=flat&labelColor=282c34&logo=github)](https://github.com/CogitatorTech/zigformer/actions/workflows/tests.yml)
 [![License](https://img.shields.io/badge/license-MIT-007ec6?label=license&style=flat&labelColor=282c34&logo=open-source-initiative)](https://github.com/CogitatorTech/zigformer/blob/main/LICENSE)
 [![Docs](https://img.shields.io/badge/docs-read-blue?style=flat&labelColor=282c34&logo=read-the-docs)](https://CogitatorTech.github.io/zigformer/)
-[![Zig Version](https://img.shields.io/badge/Zig-0.15.2-orange?logo=zig&labelColor=282c34)](https://ziglang.org/download/)
+[![Zig Version](https://img.shields.io/badge/Zig-0.16.0-orange?logo=zig&labelColor=282c34)](https://ziglang.org/download/)
 [![Release](https://img.shields.io/github/release/CogitatorTech/zigformer.svg?label=release&style=flat&labelColor=282c34&logo=github)](https://github.com/CogitatorTech/zigformer/releases/latest)
 
 An educational transformer-based LLM in pure Zig
@@ -31,7 +31,7 @@ It can be used as a [Zig library](https://CogitatorTech.github.io/zigformer/) fo
 [standalone application](https://github.com/CogitatorTech/zigformer/releases/latest)
 for training, inference, and chatting with the model.
 
-The diagrams below show the high-level architecture and its core components.
+The diagrams below show the high-level architecture of ZigFormer and the workflow of training and inference.
 
 ![ZigFormer Architecture](assets/diagrams/zigformer_architecture_v0.1.0.svg)
 
@@ -67,7 +67,7 @@ zig build
 ```
 
 > [!IMPORTANT]
-> ZigFormer is developed and tested with Zig 0.15.2.
+> ZigFormer is developed and tested with Zig 0.16.0.
 > It should work with newer versions, but it is not guaranteed.
 
 #### Training a Model

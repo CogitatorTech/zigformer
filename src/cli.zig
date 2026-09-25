@@ -1,4 +1,5 @@
 const std = @import("std");
+const io = std.Options.debug_io;
 const chilli = @import("chilli");
 const zigformer = @import("zigformer");
 const llm = zigformer.llm;
@@ -39,10 +40,7 @@ const Config = struct {
 };
 
 fn loadConfig(allocator: std.mem.Allocator, path: []const u8) !Config {
-    const file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
-
-    const contents = try file.readToEndAlloc(allocator, 10 * 1024 * 1024);
+    const contents = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(10 * 1024 * 1024));
     defer allocator.free(contents);
 
     const parsed = try std.json.parseFromSlice(Config, allocator, contents, .{ .ignore_unknown_fields = true });
@@ -83,10 +81,7 @@ fn stringLessThan(_: void, lhs: []const u8, rhs: []const u8) bool {
 }
 
 fn readJsonLines(allocator: std.mem.Allocator, path: []const u8) !JsonData {
-    const file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
-
-    const contents = try file.readToEndAlloc(allocator, 10 * 1024 * 1024);
+    const contents = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(10 * 1024 * 1024));
 
     const parsed = std.json.parseFromSlice([]const []const u8, allocator, contents, .{}) catch |err| {
         std.debug.print("Error parsing JSON file: {s}\n", .{path});
@@ -119,7 +114,7 @@ fn buildVocabFromDatasets(allocator: std.mem.Allocator, pretrain: []const []cons
         }
     }
 
-    var vocab_words = std.ArrayList([]const u8){};
+    var vocab_words = std.ArrayList([]const u8).empty;
     defer vocab_words.deinit(allocator);
     var it = vocab_set.keyIterator();
     while (it.next()) |key| {
@@ -216,12 +211,11 @@ fn trainAndMaybeRepl(allocator: std.mem.Allocator, pretrain_path: []const u8, ch
     std.debug.print("Type a prompt and press Enter to generate text.\n", .{});
     std.debug.print("Type 'exit' to quit.\n", .{});
 
-    const stdin_file = std.fs.File.stdin();
-    const stdin = stdin_file.deprecatedReader();
-    var buffer: [1024]u8 = undefined;
+    var stdin_buffer: [1024]u8 = undefined;
+    var stdin = std.Io.File.stdin().reader(io, &stdin_buffer);
     while (true) {
         std.debug.print("\nEnter prompt: ", .{});
-        const input = (try stdin.readUntilDelimiterOrEof(&buffer, '\n')) orelse break;
+        const input = try stdin.interface.takeDelimiter('\n') orelse break;
         if (std.mem.eql(u8, std.mem.trim(u8, input, " \r\n"), "exit")) {
             std.debug.print("Exiting interactive mode.\n", .{});
             break;
@@ -236,7 +230,7 @@ fn trainAndMaybeRepl(allocator: std.mem.Allocator, pretrain_path: []const u8, ch
 }
 
 fn execRoot(ctx: chilli.CommandContext) !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -277,7 +271,7 @@ fn execRoot(ctx: chilli.CommandContext) !void {
 }
 
 fn execPredict(ctx: chilli.CommandContext) !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -326,15 +320,15 @@ fn execPredict(ctx: chilli.CommandContext) !void {
     std.debug.print("{s}\n", .{result});
 }
 
-pub fn main() anyerror!void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+pub fn main(init: std.process.Init.Minimal) anyerror!void {
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
     var root_cmd = try chilli.Command.init(allocator, .{
         .name = "zigformer-cli",
         .description = "An educational transformer-based LLM in Zig",
-        .version = "v0.1.1",
+        .version = "v0.1.2",
         .exec = execRoot,
     });
     defer root_cmd.deinit();
@@ -457,5 +451,5 @@ pub fn main() anyerror!void {
 
     try root_cmd.addSubcommand(predict_cmd);
 
-    try root_cmd.run(null);
+    try root_cmd.run(init.args, null);
 }

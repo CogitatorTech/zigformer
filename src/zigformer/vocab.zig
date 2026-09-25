@@ -24,7 +24,7 @@ pub const Vocab = struct {
             .allocator = allocator,
             .encode_map = std.StringHashMap(u32).init(allocator),
             .decode_map = std.AutoHashMap(u32, []const u8).init(allocator),
-            .words = std.ArrayList([]const u8){},
+            .words = std.ArrayList([]const u8).empty,
             .owns_words = false,
         };
     }
@@ -94,26 +94,26 @@ pub const Vocab = struct {
         }
     }
 
-    pub fn load(allocator: std.mem.Allocator, reader: anytype) !Vocab {
+    pub fn load(allocator: std.mem.Allocator, reader: *std.Io.Reader) !Vocab {
         var vocab = Vocab.init(allocator);
         errdefer vocab.deinit();
 
         // Read vocab size
-        const vocab_size = try reader.readInt(usize, .little);
+        const vocab_size = try reader.takeInt(usize, .little);
 
         // Read each word
-        var word_list = std.ArrayList([]const u8){};
+        var word_list = std.ArrayList([]const u8).empty;
         defer word_list.deinit(allocator);
         errdefer {
             for (word_list.items) |w| allocator.free(w);
         }
 
         for (0..vocab_size) |_| {
-            const word_len = try reader.readInt(usize, .little);
+            const word_len = try reader.takeInt(usize, .little);
             const word = try allocator.alloc(u8, word_len);
             errdefer allocator.free(word);
 
-            try reader.readNoEof(word);
+            try reader.readSliceAll(word);
             try word_list.append(allocator, word);
         }
 
@@ -127,7 +127,7 @@ pub const Vocab = struct {
     /// Caller owns the returned ArrayList and its contents.
     /// This function returns slices of the input `text` to avoid allocation where possible.
     pub fn tokenizeRaw(allocator: std.mem.Allocator, text: []const u8) !std.ArrayList([]const u8) {
-        var list = std.ArrayList([]const u8){};
+        var list = std.ArrayList([]const u8).empty;
         errdefer list.deinit(allocator);
 
         var it = std.mem.splitScalar(u8, text, ' ');
@@ -188,15 +188,12 @@ test "Vocab load and save memory safety" {
     try vocab1.build(words);
 
     // Save to buffer
-    var buffer = std.ArrayList(u8){};
-    defer buffer.deinit(allocator);
-    const writer = buffer.writer(allocator);
-    try vocab1.save(writer);
+    var buffer: std.Io.Writer.Allocating = .init(allocator);
+    defer buffer.deinit();
+    try vocab1.save(&buffer.writer);
 
-    // Load from buffer
-    var stream = std.io.fixedBufferStream(buffer.items);
-    const reader = stream.reader();
-    var vocab2 = try Vocab.load(allocator, reader);
+    var reader = std.Io.Reader.fixed(buffer.written());
+    var vocab2 = try Vocab.load(allocator, &reader);
     defer vocab2.deinit(); // This should properly free allocated words
 
     // Verify loaded vocab works

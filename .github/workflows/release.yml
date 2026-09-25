@@ -1,4 +1,4 @@
-name: Create Release
+name: Create release
 
 on:
   workflow_dispatch:
@@ -14,7 +14,7 @@ jobs:
     uses: ./.github/workflows/tests.yml
 
   create-release:
-    name: Create Release
+    name: Create release
     runs-on: ubuntu-latest
 
     # Try to publish only if the tests pass
@@ -53,7 +53,7 @@ jobs:
             echo "RELEASE_TAG=manual-${{ github.run_id }}" >> $GITHUB_ENV
           fi
 
-      - name: Create Release
+      - name: Create release
         id: create_release
         uses: actions/create-release@v1
         env:
@@ -65,7 +65,7 @@ jobs:
           prerelease: true
 
   build-and-upload:
-    name: Build and Upload
+    name: Build and upload
     needs: create-release
     runs-on: ${{ matrix.os }}
     permissions:
@@ -107,7 +107,7 @@ jobs:
       - name: Install Zig
         uses: goto-bus-stop/setup-zig@v2
         with:
-          version: "0.15.2"
+          version: "0.16.0"
 
       - name: Build the binary
         run: zig build -Doptimize=ReleaseSmall -Dtarget=${{ matrix.target }}
@@ -159,7 +159,7 @@ jobs:
           Move-Item zig-out\bin\zigformer-gui.exe $env:RELEASE_DIR\
           Compress-Archive -Path "$env:RELEASE_DIR\*" -DestinationPath ${{ matrix.artifact_name }}
 
-      - name: Upload Release Asset
+      - name: Upload release asset
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

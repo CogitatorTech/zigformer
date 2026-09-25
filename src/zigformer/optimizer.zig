@@ -46,6 +46,7 @@ pub const Adam = struct {
     // Gradient accumulation support
     grad_accumulator: Matrix,
     accumulation_counter: usize = 0,
+    accumulation_steps: usize = 1,
 
     /// Initialize Adam optimizer for a parameter matrix.
     ///
@@ -72,11 +73,29 @@ pub const Adam = struct {
     }
 
     pub fn step(self: *Adam, params: *Matrix, grads: Matrix, lr: f32) void {
+        self.accumulateGradients(grads);
+        if (self.accumulation_counter >= self.accumulation_steps) self.applyAccumulated(params, lr);
+    }
+
+    pub fn setAccumulationSteps(self: *Adam, steps: usize) void {
+        self.accumulation_steps = @max(1, steps);
+    }
+
+    /// Accumulate raw gradients so a final partial group can be averaged correctly.
+    pub fn accumulateGradients(self: *Adam, grads: Matrix) void {
+        for (self.grad_accumulator.data, grads.data) |*acc, g| acc.* += g;
+        self.accumulation_counter += 1;
+    }
+
+    /// Apply accumulated gradients and reset the accumulator.
+    pub fn applyAccumulated(self: *Adam, params: *Matrix, lr: f32) void {
+        if (self.accumulation_counter == 0) return;
         self.timestep += 1;
 
-        // Clone gradients to avoid mutating input
-        var clipped_grads = grads.clone() catch unreachable;
+        var clipped_grads = self.grad_accumulator.clone() catch unreachable;
         defer clipped_grads.deinit();
+        const average_scale = 1.0 / @as(f32, @floatFromInt(self.accumulation_counter));
+        for (clipped_grads.data) |*g| g.* *= average_scale;
 
         // Gradient Clipping
         var sum_sq: f32 = 0.0;
@@ -111,65 +130,7 @@ pub const Adam = struct {
             const update = lr * m_hat / (std.math.sqrt(v_hat) + self.epsilon);
             p.* -= update;
         }
-    }
-
-    /// Accumulate gradients without updating parameters
-    pub fn accumulateGradients(self: *Adam, grads: Matrix, accumulation_steps: usize) void {
-        const scale = 1.0 / @as(f32, @floatFromInt(accumulation_steps));
-        for (self.grad_accumulator.data, grads.data) |*acc, g| {
-            acc.* += g * scale;
-        }
-        self.accumulation_counter += 1;
-    }
-
-    /// Apply accumulated gradients and reset accumulator
-    pub fn applyAccumulated(self: *Adam, params: *Matrix, lr: f32) void {
-        if (self.accumulation_counter == 0) return;
-
-        self.timestep += 1;
-
-        // Clone accumulated gradients to avoid mutation
-        var clipped_grads = self.grad_accumulator.clone() catch unreachable;
-        defer clipped_grads.deinit();
-
-        // Gradient Clipping on accumulated gradients
-        var sum_sq: f32 = 0.0;
-        for (clipped_grads.data) |g| {
-            sum_sq += g * g;
-        }
-        const norm = std.math.sqrt(sum_sq);
-        if (norm > self.clip_threshold) {
-            const scale = self.clip_threshold / (norm + 1e-6);
-            for (clipped_grads.data) |*g| {
-                g.* *= scale;
-            }
-        }
-
-        for (self.m.data, clipped_grads.data) |*m_val, g_val| {
-            m_val.* = self.beta1 * m_val.* + (1.0 - self.beta1) * g_val;
-        }
-
-        for (self.v.data, clipped_grads.data) |*v_val, g_val| {
-            v_val.* = self.beta2 * v_val.* + (1.0 - self.beta2) * (g_val * g_val);
-        }
-
-        const beta1_t = std.math.pow(f32, self.beta1, @floatFromInt(self.timestep));
-        const beta2_t = std.math.pow(f32, self.beta2, @floatFromInt(self.timestep));
-
-        const m_hat_denom = 1.0 - beta1_t;
-        const v_hat_denom = 1.0 - beta2_t;
-
-        for (params.data, self.m.data, self.v.data) |*p, m_val, v_val| {
-            const m_hat = m_val / m_hat_denom;
-            const v_hat = v_val / v_hat_denom;
-            const update = lr * m_hat / (std.math.sqrt(v_hat) + self.epsilon);
-            p.* -= update;
-        }
-
-        // Reset accumulator
-        for (self.grad_accumulator.data) |*acc| {
-            acc.* = 0.0;
-        }
+        @memset(self.grad_accumulator.data, 0.0);
         self.accumulation_counter = 0;
     }
 };

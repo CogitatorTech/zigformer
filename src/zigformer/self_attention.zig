@@ -491,12 +491,6 @@ pub const SelfAttention = struct {
         var grad_w_v = try cached_input_t.dot(&grad_v);
         defer grad_w_v.deinit();
 
-        // Update weights
-        self.optimizer_w_q.step(&self.w_q, grad_w_q, lr);
-        self.optimizer_w_k.step(&self.w_k, grad_w_k, lr);
-        self.optimizer_w_v.step(&self.w_v, grad_w_v, lr);
-        self.optimizer_w_o.step(&self.w_o, grad_w_o, lr);
-
         // Compute gradient w.r.t input
         var w_q_t = try self.w_q.transpose();
         defer w_q_t.deinit();
@@ -516,7 +510,26 @@ pub const SelfAttention = struct {
         var grad_input = try grad_input_q.add(&grad_input_k);
         defer grad_input.deinit();
         const grad_input_sum = try grad_input.add(&grad_input_v);
+
+        self.optimizer_w_q.step(&self.w_q, grad_w_q, lr);
+        self.optimizer_w_k.step(&self.w_k, grad_w_k, lr);
+        self.optimizer_w_v.step(&self.w_v, grad_w_v, lr);
+        self.optimizer_w_o.step(&self.w_o, grad_w_o, lr);
         return grad_input_sum;
+    }
+
+    pub fn setAccumulationSteps(self: *SelfAttention, steps: usize) void {
+        self.optimizer_w_q.setAccumulationSteps(steps);
+        self.optimizer_w_k.setAccumulationSteps(steps);
+        self.optimizer_w_v.setAccumulationSteps(steps);
+        self.optimizer_w_o.setAccumulationSteps(steps);
+    }
+
+    pub fn applyAccumulated(self: *SelfAttention, lr: f32) void {
+        self.optimizer_w_q.applyAccumulated(&self.w_q, lr);
+        self.optimizer_w_k.applyAccumulated(&self.w_k, lr);
+        self.optimizer_w_v.applyAccumulated(&self.w_v, lr);
+        self.optimizer_w_o.applyAccumulated(&self.w_o, lr);
     }
 
     pub fn parameters(self: *const SelfAttention) usize {
@@ -538,10 +551,10 @@ pub const SelfAttention = struct {
         try self.w_o.save(writer);
     }
 
-    pub fn load(allocator: std.mem.Allocator, reader: anytype) !*SelfAttention {
-        const embedding_dim = try reader.readInt(usize, .little);
-        const num_heads = try reader.readInt(usize, .little);
-        const head_dim = try reader.readInt(usize, .little);
+    pub fn load(allocator: std.mem.Allocator, reader: *std.Io.Reader) !*SelfAttention {
+        const embedding_dim = try reader.takeInt(usize, .little);
+        const num_heads = try reader.takeInt(usize, .little);
+        const head_dim = try reader.takeInt(usize, .little);
 
         const self = try allocator.create(SelfAttention);
         errdefer allocator.destroy(self);

@@ -29,6 +29,7 @@
 //!   - Beam search: maintain k best sequences
 
 const std = @import("std");
+const io = std.Options.debug_io;
 const lib = @import("../lib.zig");
 const linalg = lib.linalg;
 const Matrix = linalg.Matrix;
@@ -48,7 +49,7 @@ pub const BeamNode = struct {
     finished: bool, // Whether sequence ended with </s>
 
     pub fn init(allocator: std.mem.Allocator, initial_seq: []const u32, initial_score: f32) !BeamNode {
-        var seq = std.ArrayListUnmanaged(u32){};
+        var seq = std.ArrayListUnmanaged(u32).empty;
         try seq.appendSlice(allocator, initial_seq);
         return BeamNode{
             .sequence = seq,
@@ -62,7 +63,7 @@ pub const BeamNode = struct {
     }
 
     pub fn clone(self: *const BeamNode, allocator: std.mem.Allocator) !BeamNode {
-        var seq = std.ArrayListUnmanaged(u32){};
+        var seq = std.ArrayListUnmanaged(u32).empty;
         try seq.appendSlice(allocator, self.sequence.items);
         return BeamNode{
             .sequence = seq,
@@ -86,7 +87,7 @@ pub const LLM = struct {
     network: std.ArrayList(Layer),
 
     pub fn init(allocator: std.mem.Allocator, vocab: Vocab) !LLM {
-        var network = std.ArrayList(Layer){};
+        var network = std.ArrayList(Layer).empty;
         errdefer {
             for (network.items) |layer| {
                 layer.deinit();
@@ -147,7 +148,7 @@ pub const LLM = struct {
     }
 
     pub fn tokenize(self: *const LLM, text: []const u8) !std.ArrayList(u32) {
-        var tokens = std.ArrayList(u32){};
+        var tokens = std.ArrayList(u32).empty;
         errdefer tokens.deinit(self.allocator);
         try tokens.ensureTotalCapacity(self.allocator, text.len / 4);
 
@@ -157,6 +158,8 @@ pub const LLM = struct {
         for (raw_tokens.items) |word| {
             if (self.vocab.encode(word)) |token_id| {
                 try tokens.append(self.allocator, token_id);
+            } else {
+                return error.UnknownToken;
             }
         }
         return tokens;
@@ -186,7 +189,7 @@ pub const LLM = struct {
     }
 
     fn greedyDecode(probs: *const Matrix) !std.ArrayList(u32) {
-        var tokens = std.ArrayList(u32){};
+        var tokens = std.ArrayList(u32).empty;
         errdefer tokens.deinit(probs.allocator);
         try tokens.ensureTotalCapacity(probs.allocator, probs.rows);
         for (0..probs.rows) |r| {
@@ -205,11 +208,13 @@ pub const LLM = struct {
     }
 
     fn topKSampling(probs: *const Matrix, k: usize, allocator: std.mem.Allocator) !std.ArrayList(u32) {
-        var tokens = std.ArrayList(u32){};
+        var tokens = std.ArrayList(u32).empty;
         errdefer tokens.deinit(allocator);
         try tokens.ensureTotalCapacity(allocator, probs.rows);
 
-        var prng = std.Random.DefaultPrng.init(@intCast(std.time.timestamp()));
+        var seed: u64 = undefined;
+        io.random(std.mem.asBytes(&seed));
+        var prng = std.Random.DefaultPrng.init(seed);
         const random = prng.random();
 
         for (0..probs.rows) |r| {
@@ -256,11 +261,13 @@ pub const LLM = struct {
     }
 
     fn topPSampling(probs: *const Matrix, p: f32, allocator: std.mem.Allocator) !std.ArrayList(u32) {
-        var tokens = std.ArrayList(u32){};
+        var tokens = std.ArrayList(u32).empty;
         errdefer tokens.deinit(allocator);
         try tokens.ensureTotalCapacity(allocator, probs.rows);
 
-        var prng = std.Random.DefaultPrng.init(@intCast(std.time.timestamp()));
+        var seed: u64 = undefined;
+        io.random(std.mem.asBytes(&seed));
+        var prng = std.Random.DefaultPrng.init(seed);
         const random = prng.random();
 
         for (0..probs.rows) |r| {
@@ -327,7 +334,7 @@ pub const LLM = struct {
             return self.allocator.dupe(u8, "");
         }
 
-        var beam = std.ArrayListUnmanaged(BeamNode){};
+        var beam = std.ArrayListUnmanaged(BeamNode).empty;
         defer {
             for (beam.items) |*node| node.deinit(self.allocator);
             beam.deinit(self.allocator);
@@ -339,7 +346,7 @@ pub const LLM = struct {
         const end_token = self.vocab.encode("</s>").?;
 
         for (0..max_new_tokens) |_| {
-            var candidates = std.ArrayListUnmanaged(BeamNode){};
+            var candidates = std.ArrayListUnmanaged(BeamNode).empty;
             defer {
                 for (candidates.items) |*node| node.deinit(self.allocator);
                 candidates.deinit(self.allocator);
@@ -397,7 +404,7 @@ pub const LLM = struct {
 
                 // Select top beam_width candidates
                 const TopToken = struct { idx: u32, score: f32 };
-                var top_tokens = std.ArrayListUnmanaged(TopToken){};
+                var top_tokens = std.ArrayListUnmanaged(TopToken).empty;
                 defer top_tokens.deinit(self.allocator);
 
                 // Simple top-k selection
@@ -442,7 +449,7 @@ pub const LLM = struct {
 
         // Return best sequence (excluding prompt)
         const best_node = beam.items[0];
-        var result_builder = std.ArrayList(u8){};
+        var result_builder = std.ArrayList(u8).empty;
         defer result_builder.deinit(self.allocator);
 
         // Skip prompt tokens
@@ -461,7 +468,7 @@ pub const LLM = struct {
         var tokenized = try self.tokenize(text);
         defer tokenized.deinit(self.allocator);
 
-        var output_tokens = std.ArrayList(u32){};
+        var output_tokens = std.ArrayList(u32).empty;
         defer output_tokens.deinit(self.allocator);
 
         const input_len = tokenized.items.len;
@@ -536,7 +543,7 @@ pub const LLM = struct {
             }
         }
 
-        var result_builder = std.ArrayList(u8){};
+        var result_builder = std.ArrayList(u8).empty;
         defer result_builder.deinit(self.allocator);
         for (output_tokens.items, 0..) |tok, i| {
             if (self.vocab.decode(tok)) |word| {
@@ -579,7 +586,7 @@ pub const LLM = struct {
         var tokenized = try self.tokenize(text);
         defer tokenized.deinit(self.allocator);
 
-        var output_tokens = std.ArrayList(u32){};
+        var output_tokens = std.ArrayList(u32).empty;
         defer output_tokens.deinit(self.allocator);
 
         const input_len = tokenized.items.len;
@@ -638,7 +645,7 @@ pub const LLM = struct {
             }
         }
 
-        var result_builder = std.ArrayList(u8){};
+        var result_builder = std.ArrayList(u8).empty;
         defer result_builder.deinit(self.allocator);
         for (output_tokens.items, 0..) |tok, i| {
             if (self.vocab.decode(tok)) |word| {
@@ -650,25 +657,32 @@ pub const LLM = struct {
     }
 
     fn crossEntropyLoss(probs: *const Matrix, targets: []const u32) f32 {
-        if (targets.len == 0) return 0.0; // Avoid division by zero
+        var valid_targets: usize = 0;
         var loss: f32 = 0.0;
         for (targets, 0..) |target_id, i| {
+            if (target_id == std.math.maxInt(u32)) continue;
             const prob_target = probs.at(i, target_id);
             loss -= std.math.log(f32, std.math.e, @max(1e-15, prob_target));
+            valid_targets += 1;
         }
-        return loss / @as(f32, @floatFromInt(targets.len));
+        if (valid_targets == 0) return 0.0;
+        return loss / @as(f32, @floatFromInt(valid_targets));
     }
 
     fn computeGradients(probs: *const Matrix, targets: []const u32) !Matrix {
-        var grads = try probs.clone();
-        const batch_size: f32 = @floatFromInt(targets.len);
-        for (0..grads.rows) |r| {
-            if (r < targets.len) {
-                grads.data[r * grads.cols + targets[r]] -= 1.0;
-            }
+        var grads = try Matrix.initZeros(probs.allocator, probs.rows, probs.cols);
+        var valid_targets: usize = 0;
+        for (targets, 0..) |target_id, r| {
+            if (target_id == std.math.maxInt(u32)) continue;
+            const row_start = r * grads.cols;
+            for (0..grads.cols) |c| grads.data[row_start + c] = probs.data[row_start + c];
+            grads.data[row_start + target_id] -= 1.0;
+            valid_targets += 1;
         }
+        if (valid_targets == 0) return grads;
+        const scale: f32 = 1.0 / @as(f32, @floatFromInt(valid_targets));
         for (grads.data) |*g| {
-            g.* /= batch_size;
+            g.* *= scale;
         }
         return grads;
     }
@@ -683,13 +697,33 @@ pub const LLM = struct {
         }
     }
 
+    fn setAccumulationSteps(self: *LLM, steps: usize) void {
+        const embeddings: *Embeddings = @ptrCast(@alignCast(self.network.items[0].self));
+        embeddings.setAccumulationSteps(steps);
+        for (self.network.items[1..4]) |*layer| {
+            const block: *TransformerBlock = @ptrCast(@alignCast(layer.self));
+            block.setAccumulationSteps(steps);
+        }
+        const output: *OutputProjection = @ptrCast(@alignCast(self.network.items[4].self));
+        output.setAccumulationSteps(steps);
+    }
+
+    fn applyAccumulated(self: *LLM, lr: f32) void {
+        const embeddings: *Embeddings = @ptrCast(@alignCast(self.network.items[0].self));
+        embeddings.applyAccumulated(lr);
+        for (self.network.items[1..4]) |*layer| {
+            const block: *TransformerBlock = @ptrCast(@alignCast(layer.self));
+            block.applyAccumulated(lr);
+        }
+        const output: *OutputProjection = @ptrCast(@alignCast(self.network.items[4].self));
+        output.applyAccumulated(lr);
+    }
+
     pub fn train(self: *LLM, data: []const []const u8, epochs: usize, lr: f32, batch_size: usize, accumulation_steps: usize) !void {
         self.setBatchSize(batch_size);
+        self.setAccumulationSteps(accumulation_steps);
 
-        // The learning rate for gradient accumulation
-        const effective_lr = lr / @as(f32, @floatFromInt(accumulation_steps));
-
-        var tokenized_data = std.ArrayList(std.ArrayList(u32)){};
+        var tokenized_data = std.ArrayList(std.ArrayList(u32)).empty;
         defer {
             for (tokenized_data.items) |*seq| seq.deinit(self.allocator);
             tokenized_data.deinit(self.allocator);
@@ -706,7 +740,6 @@ pub const LLM = struct {
         for (0..epochs) |epoch| {
             var total_loss: f32 = 0.0;
             var processed_batches: usize = 0;
-            var accumulation_counter: usize = 0;
 
             var i: usize = 0;
             while (i < tokenized_data.items.len) : (i += batch_size) {
@@ -751,7 +784,7 @@ pub const LLM = struct {
                             targets[global_idx] = target_ids[t];
                         } else {
                             input_matrix.data[global_idx] = 0;
-                            targets[global_idx] = 0;
+                            targets[global_idx] = std.math.maxInt(u32);
                         }
                     }
                 }
@@ -775,22 +808,16 @@ pub const LLM = struct {
 
                 var grads = try computeGradients(&probs, targets);
 
-                // Backward pass with effective learning rate
+                // Backward pass; optimizers apply once per accumulation group.
                 var layer_idx = self.network.items.len;
                 while (layer_idx > 0) {
                     layer_idx -= 1;
-                    const next_grads = try self.network.items[layer_idx].backward(grads, effective_lr);
+                    const next_grads = try self.network.items[layer_idx].backward(grads, lr);
                     grads = next_grads;
                 }
                 grads.deinit();
 
-                accumulation_counter += 1;
-
-                // Track processed batches (count every accumulation_steps batches as one effective batch)
-                if (accumulation_counter >= accumulation_steps) {
-                    processed_batches += 1;
-                    accumulation_counter = 0;
-                }
+                processed_batches += 1;
 
                 // Restore batch size if changed
                 if (current_batch_size != batch_size) {
@@ -798,8 +825,10 @@ pub const LLM = struct {
                 }
             }
 
+            self.applyAccumulated(lr);
+
             if (processed_batches > 0) {
-                std.debug.print("Epoch {}: Loss = {:.4}\n", .{ epoch, total_loss / @as(f32, @floatFromInt(processed_batches * accumulation_steps)) });
+                std.debug.print("Epoch {}: Loss = {:.4}\n", .{ epoch, total_loss / @as(f32, @floatFromInt(processed_batches)) });
             } else {
                 std.debug.print("Epoch {}: No data processed.\n", .{epoch});
             }
@@ -807,12 +836,9 @@ pub const LLM = struct {
     }
 
     pub fn save(self: *const LLM, path: []const u8) !void {
-        const file = try std.fs.cwd().createFile(path, .{});
-        defer file.close();
-
-        var buffer = std.ArrayList(u8){};
-        defer buffer.deinit(self.allocator);
-        const writer = buffer.writer(self.allocator);
+        var buffer: std.Io.Writer.Allocating = .init(self.allocator);
+        defer buffer.deinit();
+        const writer = &buffer.writer;
 
         // Write magic number "ZGFM"
         try writer.writeAll("ZGFM");
@@ -842,32 +868,26 @@ pub const LLM = struct {
         const output_ptr: *const OutputProjection = @ptrCast(@alignCast(self.network.items[4].self));
         try output_ptr.save(writer);
 
-        try file.writeAll(buffer.items);
+        try std.Io.Dir.cwd().writeFile(io, .{ .sub_path = path, .data = buffer.written() });
         std.debug.print("Model saved to {s}\n", .{path});
     }
 
     pub fn load(allocator: std.mem.Allocator, path: []const u8) !LLM {
-        const file = try std.fs.cwd().openFile(path, .{});
-        defer file.close();
-
-        const file_size = try file.getEndPos();
-        const buffer = try allocator.alloc(u8, file_size);
+        const buffer = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(std.math.maxInt(usize)));
         defer allocator.free(buffer);
-        _ = try file.readAll(buffer);
-
-        var stream = std.io.fixedBufferStream(buffer);
-        const reader = stream.reader();
+        var reader_value = std.Io.Reader.fixed(buffer);
+        const reader = &reader_value;
 
         // Read and verify magic number
         var magic: [4]u8 = undefined;
-        _ = try reader.readAll(&magic);
+        try reader.readSliceAll(&magic);
         if (!std.mem.eql(u8, &magic, "ZGFM")) {
             return error.InvalidModelFile;
         }
 
         // Read version
         var version_bytes: [4]u8 = undefined;
-        _ = try reader.readAll(&version_bytes);
+        try reader.readSliceAll(&version_bytes);
         const version = std.mem.readInt(u32, &version_bytes, .little);
         if (version != 1) {
             return error.UnsupportedModelVersion;
@@ -877,7 +897,7 @@ pub const LLM = struct {
         var vocab = try Vocab.load(allocator, reader);
         errdefer vocab.deinit();
 
-        var network = std.ArrayList(Layer){};
+        var network = std.ArrayList(Layer).empty;
         errdefer {
             for (network.items) |layer| {
                 layer.deinit();
@@ -929,7 +949,7 @@ test "LLM (save and load)" {
     // Save model
     const test_path = "test_model.bin";
     try model.save(test_path);
-    defer std.fs.cwd().deleteFile(test_path) catch {};
+    defer std.Io.Dir.cwd().deleteFile(std.testing.io, test_path) catch {};
 
     // Load model
     var loaded_model = try LLM.load(allocator, test_path);
