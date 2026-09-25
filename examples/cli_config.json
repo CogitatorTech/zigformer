@@ -1,0 +1,12 @@
+{
+    "pretrain_path": "datasets/simple_dataset/pretrain.json",
+    "train_path": "datasets/simple_dataset/train.json",
+    "pre_epochs": 10,
+    "chat_epochs": 10,
+    "batch_size": 32,
+    "accumulation_steps": 1,
+    "pre_lr": 0.0005,
+    "chat_lr": 0.0001,
+    "save_model_path": "model.bin",
+    "interactive": false
+}

@@ -67,8 +67,8 @@ zig build
 ```
 
 > [!IMPORTANT]
-> ZigFormer is developed and tested with Zig 0.16.0.
-> It should work with newer versions, but it is not guaranteed.
+> Make sure you have Zig 0.16.0 installed.
+> You can check your Zig version with `zig version`.
 
 #### Training a Model
 
@@ -84,28 +84,16 @@ This will:
 4. Train (or fine-tune) the model on question-answer pairs
 5. Save the trained model to `model.bin`
 
+The CLI then enters interactive mode.
+Type `exit` to quit.
+
 Training parameters can be given through a configuration file or CLI arguments.
 
 ```bash
-zig build run -- --config my_config.json
+zig build run -- --config examples/cli_config.json
 ```
 
-**Sample CLI Configuration:**
-
-```json
-{
-    "pretrain_path": "datasets/simple_dataset/pretrain.json",
-    "train_path": "datasets/simple_dataset/train.json",
-    "pre_epochs": 10,
-    "chat_epochs": 10,
-    "batch_size": 32,
-    "accumulation_steps": 1,
-    "pre_lr": 0.0005,
-    "chat_lr": 0.0001,
-    "save_model_path": "model.bin",
-    "interactive": true
-}
-```
+Edit [the CLI example configuration](examples/cli_config.json) to change the datasets, training parameters, model path, or interactive mode.
 
 > [!IMPORTANT]
 > A saved model only works with the model with the same configuration.
@@ -123,23 +111,10 @@ The UI can be accessed at `http://localhost:8085` by default.
 You can also provide a configuration file for the UI:
 
 ```bash
-zig build run-gui -- --config gui_config.json
+zig build run-gui -- --config examples/gui_config.json
 ```
 
-**Sample Web UI Configuration:**
-
-```json
-{
-    "port": 8085,
-    "host": "0.0.0.0",
-    "pretrain_path": "datasets/simple_dataset/pretrain.json",
-    "train_path": "datasets/simple_dataset/train.json",
-    "load_model_path": "model.bin",
-    "max_request_size": 1048576,
-    "max_prompt_length": 1000,
-    "timeout_seconds": 30
-}
-```
+Edit [the Web UI example configuration](examples/gui_config.json) to change the host, port, model path, or request limits.
 
 #### Available Options (CLI and Web UI)
 
@@ -157,8 +132,8 @@ zig build run -- --save-model model.bin
 ```
 
 ```bash
-# Generate coherent text (using Beam search with beam width of 5)
-zig build run -- predict --prompt "How do mountains form?" --beam-width 5
+# Generate text from the saved model using beam search with beam width 5
+zig build run -- predict --prompt "How do mountains form?" --beam-width 5 --load-model model.bin
 ```
 
 ```bash
