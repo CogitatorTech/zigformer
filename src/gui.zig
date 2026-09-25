@@ -1,4 +1,5 @@
 const std = @import("std");
+const io = std.Options.debug_io;
 const chilli = @import("chilli");
 const zigformer = @import("zigformer");
 const llm = zigformer.llm;
@@ -31,11 +32,11 @@ const Config = struct {
 const ServerState = struct {
     allocator: std.mem.Allocator,
     model: *llm.LLM,
-    mutex: std.Thread.Mutex,
+    mutex: std.Io.Mutex,
 };
 
 fn splitText(text: []const u8, allocator: std.mem.Allocator) !std.ArrayList([]const u8) {
-    var list = std.ArrayList([]const u8){};
+    var list = std.ArrayList([]const u8).empty;
     errdefer list.deinit(allocator);
     var it = std.mem.splitScalar(u8, text, ' ');
     while (it.next()) |word| {
@@ -45,10 +46,7 @@ fn splitText(text: []const u8, allocator: std.mem.Allocator) !std.ArrayList([]co
 }
 
 fn readJsonLines(allocator: std.mem.Allocator, path: []const u8) !std.json.Parsed([]const []const u8) {
-    const file = try std.fs.cwd().openFile(path, .{});
-    defer file.close();
-
-    const contents = try file.readToEndAlloc(allocator, 10 * 1024 * 1024);
+    const contents = try std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(10 * 1024 * 1024));
     defer allocator.free(contents);
 
     return std.json.parseFromSlice([]const []const u8, allocator, contents, .{});
@@ -76,7 +74,7 @@ fn buildVocabFromDatasets(allocator: std.mem.Allocator, pretrain: []const []cons
         }
     }
 
-    var vocab_words = std.ArrayList([]const u8){};
+    var vocab_words = std.ArrayList([]const u8).empty;
     defer vocab_words.deinit(allocator);
     var it = vocab_set.keyIterator();
     while (it.next()) |key| {
@@ -97,14 +95,8 @@ fn buildVocabFromDatasets(allocator: std.mem.Allocator, pretrain: []const []cons
 }
 
 fn loadConfig(allocator: std.mem.Allocator, path: []const u8) !Config {
-    const file = std.fs.cwd().openFile(path, .{}) catch |err| {
+    const contents = std.Io.Dir.cwd().readFileAlloc(io, path, allocator, .limited(10 * 1024 * 1024)) catch |err| {
         std.debug.print("Error: Could not open config file '{s}': {}\n", .{ path, err });
-        return err;
-    };
-    defer file.close();
-
-    const contents = file.readToEndAlloc(allocator, 10 * 1024 * 1024) catch |err| {
-        std.debug.print("Error: Could not read config file: {}\n", .{err});
         return err;
     };
     defer allocator.free(contents);
@@ -134,18 +126,18 @@ fn validateConfig(config: Config) !void {
     }
 
     // Validate paths exist
-    std.fs.cwd().access(config.pretrain_path, .{}) catch |err| {
+    std.Io.Dir.cwd().access(io, config.pretrain_path, .{}) catch |err| {
         std.debug.print("Error: Pretrain dataset not found: {s} ({})\n", .{ config.pretrain_path, err });
         return error.FileNotFound;
     };
 
-    std.fs.cwd().access(config.train_path, .{}) catch |err| {
+    std.Io.Dir.cwd().access(io, config.train_path, .{}) catch |err| {
         std.debug.print("Error: Train dataset not found: {s} ({})\n", .{ config.train_path, err });
         return error.FileNotFound;
     };
 
     if (config.load_model_path) |path| {
-        std.fs.cwd().access(path, .{}) catch |err| {
+        std.Io.Dir.cwd().access(io, path, .{}) catch |err| {
             std.debug.print("Error: Model file not found: {s} ({})\n", .{ path, err });
             return error.FileNotFound;
         };
@@ -181,32 +173,45 @@ fn expectedRequestSize(request: []const u8) !?usize {
     return total;
 }
 
-fn handleConnection(state: *ServerState, stream: std.net.Stream, config: *const Config) !void {
-    var request_buffer = std.ArrayList(u8){};
+fn writeStream(stream: std.Io.net.Stream, data: []const u8) !void {
+    var buffer: [4096]u8 = undefined;
+    var writer = stream.writer(io, &buffer);
+    try writer.interface.writeAll(data);
+    try writer.interface.flush();
+}
+
+fn handleConnection(state: *ServerState, stream: std.Io.net.Stream, config: *const Config) !void {
+    var request_buffer = std.ArrayList(u8).empty;
     defer request_buffer.deinit(state.allocator);
+    var stream_buffer: [4096]u8 = undefined;
     var chunk: [4096]u8 = undefined;
+    var reader = stream.reader(io, &stream_buffer);
     var expected_size: ?usize = null;
     while (expected_size == null or request_buffer.items.len < expected_size.?) {
-        const bytes_read = stream.read(&chunk) catch |err| {
-            std.debug.print("[{}] Error reading from stream: {}\n", .{ std.time.timestamp(), err });
-            return err;
+        var vec: [1][]u8 = .{&chunk};
+        const bytes_read = reader.interface.readVec(&vec) catch |err| switch (err) {
+            error.EndOfStream => break,
+            else => {
+                std.debug.print("Error reading from stream: {}\n", .{err});
+                return err;
+            },
         };
         if (bytes_read == 0) break;
         if (bytes_read > config.max_request_size -| request_buffer.items.len) {
             const err_response = "HTTP/1.1 413 Payload Too Large\r\nContent-Type: application/json\r\n\r\n{\"error\": \"Request too large\"}";
-            _ = stream.writeAll(err_response) catch {};
+            writeStream(stream, err_response) catch {};
             return;
         }
         try request_buffer.appendSlice(state.allocator, chunk[0..bytes_read]);
         expected_size = expectedRequestSize(request_buffer.items) catch {
             const err_response = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n{\"error\": \"Invalid Content-Length\"}";
-            _ = stream.writeAll(err_response) catch {};
+            writeStream(stream, err_response) catch {};
             return;
         };
         if (expected_size) |size| {
             if (size > config.max_request_size) {
                 const err_response = "HTTP/1.1 413 Payload Too Large\r\nContent-Type: application/json\r\n\r\n{\"error\": \"Request too large\"}";
-                _ = stream.writeAll(err_response) catch {};
+                writeStream(stream, err_response) catch {};
                 return;
             }
         }
@@ -214,12 +219,12 @@ fn handleConnection(state: *ServerState, stream: std.net.Stream, config: *const 
 
     const expected = expected_size orelse {
         const err_response = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n{\"error\": \"Malformed request\"}";
-        _ = stream.writeAll(err_response) catch {};
+        writeStream(stream, err_response) catch {};
         return;
     };
     if (request_buffer.items.len < expected) {
         const err_response = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n{\"error\": \"Incomplete request\"}";
-        _ = stream.writeAll(err_response) catch {};
+        writeStream(stream, err_response) catch {};
         return;
     }
     const request = request_buffer.items[0..expected];
@@ -228,29 +233,29 @@ fn handleConnection(state: *ServerState, stream: std.net.Stream, config: *const 
     var lines = std.mem.splitScalar(u8, request, '\n');
     const first_line = lines.next() orelse {
         const err_response = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n{\"error\": \"Malformed request\"}";
-        _ = stream.writeAll(err_response) catch {};
+        writeStream(stream, err_response) catch {};
         return;
     };
 
     var parts = std.mem.splitScalar(u8, first_line, ' ');
     const method = parts.next() orelse {
         const err_response = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n{\"error\": \"Malformed request\"}";
-        _ = stream.writeAll(err_response) catch {};
+        writeStream(stream, err_response) catch {};
         return;
     };
     const path = parts.next() orelse {
         const err_response = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n{\"error\": \"Malformed request\"}";
-        _ = stream.writeAll(err_response) catch {};
+        writeStream(stream, err_response) catch {};
         return;
     };
 
-    std.debug.print("[{}] {s} {s}\n", .{ std.time.timestamp(), method, path });
+    std.debug.print("{s} {s}\n", .{ method, path });
 
     // Handle GET /
     if (std.mem.startsWith(u8, method, "GET") and (std.mem.eql(u8, path, "/") or std.mem.eql(u8, path, "/index.html"))) {
         const response = try std.fmt.allocPrint(state.allocator, "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\n\r\n{s}", .{ index_html.len, index_html });
         defer state.allocator.free(response);
-        _ = try stream.writeAll(response);
+        try writeStream(stream, response);
         return;
     }
 
@@ -263,14 +268,12 @@ fn handleConnection(state: *ServerState, stream: std.net.Stream, config: *const 
         const num_heads = zigformer.config.num_heads;
 
         // Manual JSON construction
-        var json = std.ArrayList(u8){};
-        defer json.deinit(state.allocator);
+        const json = try std.fmt.allocPrint(state.allocator, "{{\"vocab_size\": {}, \"embedding_dim\": {}, \"hidden_dim\": {}, \"max_seq_len\": {}, \"num_heads\": {}}}", .{ vocab_size, embedding_dim, hidden_dim, max_seq_len, num_heads });
+        defer state.allocator.free(json);
 
-        try std.fmt.format(json.writer(state.allocator), "{{\"vocab_size\": {}, \"embedding_dim\": {}, \"hidden_dim\": {}, \"max_seq_len\": {}, \"num_heads\": {}}}", .{ vocab_size, embedding_dim, hidden_dim, max_seq_len, num_heads });
-
-        const response = try std.fmt.allocPrint(state.allocator, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{s}", .{ json.items.len, json.items });
+        const response = try std.fmt.allocPrint(state.allocator, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{s}", .{ json.len, json });
         defer state.allocator.free(response);
-        _ = try stream.writeAll(response);
+        try writeStream(stream, response);
         return;
     }
 
@@ -279,7 +282,7 @@ fn handleConnection(state: *ServerState, stream: std.net.Stream, config: *const 
         // Find body (after \r\n\r\n)
         const body_start = std.mem.indexOf(u8, request, "\r\n\r\n") orelse {
             const err_response = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n{\"error\": \"Missing request body\"}";
-            _ = try stream.writeAll(err_response);
+            try writeStream(stream, err_response);
             return;
         };
         const body = request[body_start + 4 ..];
@@ -291,7 +294,7 @@ fn handleConnection(state: *ServerState, stream: std.net.Stream, config: *const 
         };
         const parsed = std.json.parseFromSlice(RequestBody, state.allocator, body, .{ .ignore_unknown_fields = true }) catch {
             const err_response = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n{\"error\": \"Invalid JSON format\"}";
-            _ = try stream.writeAll(err_response);
+            try writeStream(stream, err_response);
             return;
         };
         defer parsed.deinit();
@@ -303,14 +306,14 @@ fn handleConnection(state: *ServerState, stream: std.net.Stream, config: *const 
         // Validate prompt length
         if (prompt.len == 0) {
             const err_response = "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n{\"error\": \"Prompt cannot be empty\"}";
-            _ = try stream.writeAll(err_response);
+            try writeStream(stream, err_response);
             return;
         }
 
         if (prompt.len > config.max_prompt_length) {
             const err_response = try std.fmt.allocPrint(state.allocator, "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n{{\"error\": \"Prompt too long (max {} characters)\"}}", .{config.max_prompt_length});
             defer state.allocator.free(err_response);
-            _ = try stream.writeAll(err_response);
+            try writeStream(stream, err_response);
             return;
         }
 
@@ -318,7 +321,7 @@ fn handleConnection(state: *ServerState, stream: std.net.Stream, config: *const 
         defer state.allocator.free(formatted_input);
 
         // Run prediction (locked)
-        state.mutex.lock();
+        try state.mutex.lock(io);
         const result = blk: {
             if (top_k > 0) {
                 break :blk state.model.predictWithSampling(formatted_input, .topk, top_k, 0.0);
@@ -328,13 +331,13 @@ fn handleConnection(state: *ServerState, stream: std.net.Stream, config: *const 
                 break :blk state.model.predict(formatted_input);
             }
         } catch |err| {
-            state.mutex.unlock();
-            std.debug.print("[{}] Prediction error: {}\n", .{ std.time.timestamp(), err });
+            state.mutex.unlock(io);
+            std.debug.print("Prediction error: {}\n", .{err});
             const err_response = "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\n\r\n{\"error\": \"Model prediction failed\"}";
-            _ = try stream.writeAll(err_response);
+            try writeStream(stream, err_response);
             return;
         };
-        state.mutex.unlock();
+        state.mutex.unlock(io);
         defer state.allocator.free(result);
 
         // JSON response - manually format to avoid API issues
@@ -342,7 +345,7 @@ fn handleConnection(state: *ServerState, stream: std.net.Stream, config: *const 
         // Simple escaping for now (better to use std.json.stringify but we need allocPrint)
         // JSON response - manually format to avoid API issues
         // Simple escaping for quotes and backslashes
-        var json_response = std.ArrayList(u8){};
+        var json_response = std.ArrayList(u8).empty;
         defer json_response.deinit(state.allocator);
         try json_response.appendSlice(state.allocator, "{\"response\": \"");
         for (result) |c| {
@@ -359,13 +362,13 @@ fn handleConnection(state: *ServerState, stream: std.net.Stream, config: *const 
 
         const response = try std.fmt.allocPrint(state.allocator, "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{s}", .{ json_response.items.len, json_response.items });
         defer state.allocator.free(response);
-        _ = try stream.writeAll(response);
+        try writeStream(stream, response);
         return;
     }
 
     // 404
     const not_found = "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nContent-Length: 26\r\n\r\n{\"error\": \"Not found\"}";
-    _ = try stream.writeAll(not_found);
+    try writeStream(stream, not_found);
 }
 
 fn runServer(allocator: std.mem.Allocator, config: Config) !void {
@@ -399,29 +402,28 @@ fn runServer(allocator: std.mem.Allocator, config: Config) !void {
     std.debug.print("Model ready.\n", .{});
 
     // 2. Start Server
-    const address = try std.net.Address.parseIp(config.host, config.port);
-    var server = try address.listen(.{ .reuse_address = true });
-    defer server.deinit();
+    const address = try std.Io.net.IpAddress.parse(config.host, config.port);
+    var server = try address.listen(io, .{ .reuse_address = true });
+    defer server.deinit(io);
     std.debug.print("Listening on http://127.0.0.1:{}\n", .{config.port});
 
     var state = ServerState{
         .allocator = allocator,
         .model = model,
-        .mutex = std.Thread.Mutex{},
+        .mutex = .init,
     };
 
     while (true) {
-        var conn = try server.accept();
-        defer conn.stream.close();
-
-        handleConnection(&state, conn.stream, &config) catch |err| {
+        const stream = try server.accept(io);
+        handleConnection(&state, stream, &config) catch |err| {
             std.debug.print("Error handling connection: {}\n", .{err});
         };
+        stream.close(io);
     }
 }
 
 fn execGui(ctx: chilli.CommandContext) !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -458,8 +460,8 @@ fn execGui(ctx: chilli.CommandContext) !void {
     try runServer(allocator, config);
 }
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+pub fn main(init: std.process.Init.Minimal) !void {
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -508,5 +510,5 @@ pub fn main() !void {
         .default_value = .{ .String = "" },
     });
 
-    try cmd.run(null);
+    try cmd.run(init.args, null);
 }

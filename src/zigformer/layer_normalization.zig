@@ -206,7 +206,7 @@ pub const LayerNorm = struct {
         try self.beta.save(writer);
     }
 
-    pub fn load(allocator: std.mem.Allocator, reader: anytype) !*LayerNorm {
+    pub fn load(allocator: std.mem.Allocator, reader: *std.Io.Reader) !*LayerNorm {
         const self = try allocator.create(LayerNorm);
         errdefer allocator.destroy(self);
 
@@ -263,14 +263,12 @@ test "LayerNorm (save and load)" {
     var ln = try LayerNorm.init(allocator, feature_dim);
     defer ln.deinit();
 
-    var buffer = std.ArrayList(u8){};
-    defer buffer.deinit(allocator);
-    const writer = buffer.writer(allocator);
-    try ln.save(writer);
+    var buffer: std.Io.Writer.Allocating = .init(allocator);
+    defer buffer.deinit();
+    try ln.save(&buffer.writer);
 
-    var stream = std.io.fixedBufferStream(buffer.items);
-    const reader = stream.reader();
-    var loaded_ln = try LayerNorm.load(allocator, reader);
+    var reader = std.Io.Reader.fixed(buffer.written());
+    var loaded_ln = try LayerNorm.load(allocator, &reader);
     defer loaded_ln.deinit();
 
     try std.testing.expectEqual(ln.parameters(), loaded_ln.parameters());

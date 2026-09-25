@@ -56,7 +56,8 @@ pub const Matrix = struct {
         std_dev: f32,
     ) !Matrix {
         const mat = try init(allocator, rows, cols);
-        const seed = @as(u64, @intCast(std.time.nanoTimestamp()));
+        var seed: u64 = undefined;
+        std.Options.debug_io.random(std.mem.asBytes(&seed));
         var prng = std.Random.DefaultPrng.init(seed);
         const rand = prng.random();
         for (mat.data) |*val| {
@@ -207,12 +208,12 @@ pub const Matrix = struct {
         }
     }
 
-    pub fn load(allocator: std.mem.Allocator, reader: anytype) !Matrix {
-        const rows = try reader.readInt(usize, .little);
-        const cols = try reader.readInt(usize, .little);
+    pub fn load(allocator: std.mem.Allocator, reader: *std.Io.Reader) !Matrix {
+        const rows = try reader.takeInt(usize, .little);
+        const cols = try reader.takeInt(usize, .little);
         const matrix = try Matrix.init(allocator, rows, cols);
         for (matrix.data) |*val| {
-            const bits = try reader.readInt(u32, .little);
+            const bits = try reader.takeInt(u32, .little);
             val.* = @as(f32, @bitCast(bits));
         }
         return matrix;

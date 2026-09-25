@@ -1,5 +1,4 @@
 const std = @import("std");
-const fs = std.fs;
 
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
@@ -91,9 +90,7 @@ pub fn build(b: *std.Build) void {
     // --- Docs Setup ---
     const docs_step = b.step("docs", "Generate API documentation");
     const doc_install_path = "zig-out/docs";
-
-    // Create docs directory if it doesn't exist (portable across all platforms)
-    fs.cwd().makePath(doc_install_path) catch {};
+    std.Io.Dir.cwd().createDirPath(b.graph.io, doc_install_path) catch {};
 
     const gen_docs_cmd = b.addSystemCommand(&[_][]const u8{
         b.graph.zig_exe,

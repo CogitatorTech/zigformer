@@ -120,7 +120,7 @@ pub const OutputProjection = struct {
         try self.b_out.save(writer);
     }
 
-    pub fn load(allocator: std.mem.Allocator, reader: anytype) !*OutputProjection {
+    pub fn load(allocator: std.mem.Allocator, reader: *std.Io.Reader) !*OutputProjection {
         const self = try allocator.create(OutputProjection);
         errdefer allocator.destroy(self);
 
@@ -177,14 +177,12 @@ test "OutputProjection (save and load)" {
     var op = try OutputProjection.init(allocator, embedding_dim, vocab_size);
     defer op.deinit();
 
-    var buffer = std.ArrayList(u8){};
-    defer buffer.deinit(allocator);
-    const writer = buffer.writer(allocator);
-    try op.save(writer);
+    var buffer: std.Io.Writer.Allocating = .init(allocator);
+    defer buffer.deinit();
+    try op.save(&buffer.writer);
 
-    var stream = std.io.fixedBufferStream(buffer.items);
-    const reader = stream.reader();
-    var loaded_op = try OutputProjection.load(allocator, reader);
+    var reader = std.Io.Reader.fixed(buffer.written());
+    var loaded_op = try OutputProjection.load(allocator, &reader);
     defer loaded_op.deinit();
 
     try std.testing.expectEqual(op.parameters(), loaded_op.parameters());

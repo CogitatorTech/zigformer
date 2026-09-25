@@ -551,10 +551,10 @@ pub const SelfAttention = struct {
         try self.w_o.save(writer);
     }
 
-    pub fn load(allocator: std.mem.Allocator, reader: anytype) !*SelfAttention {
-        const embedding_dim = try reader.readInt(usize, .little);
-        const num_heads = try reader.readInt(usize, .little);
-        const head_dim = try reader.readInt(usize, .little);
+    pub fn load(allocator: std.mem.Allocator, reader: *std.Io.Reader) !*SelfAttention {
+        const embedding_dim = try reader.takeInt(usize, .little);
+        const num_heads = try reader.takeInt(usize, .little);
+        const head_dim = try reader.takeInt(usize, .little);
 
         const self = try allocator.create(SelfAttention);
         errdefer allocator.destroy(self);

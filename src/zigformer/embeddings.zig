@@ -161,7 +161,7 @@ pub const Embeddings = struct {
         try self.positional_embeddings.save(writer);
     }
 
-    pub fn load(allocator: std.mem.Allocator, reader: anytype) !*Embeddings {
+    pub fn load(allocator: std.mem.Allocator, reader: *std.Io.Reader) !*Embeddings {
         const self = try allocator.create(Embeddings);
         errdefer allocator.destroy(self);
 

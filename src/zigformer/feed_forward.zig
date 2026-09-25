@@ -198,7 +198,7 @@ pub const FeedForward = struct {
         try self.b2.save(writer);
     }
 
-    pub fn load(allocator: std.mem.Allocator, reader: anytype) !*FeedForward {
+    pub fn load(allocator: std.mem.Allocator, reader: *std.Io.Reader) !*FeedForward {
         const self = try allocator.create(FeedForward);
         errdefer allocator.destroy(self);
 
@@ -268,14 +268,12 @@ test "FeedForward (save and load)" {
     var ff = try FeedForward.init(allocator, embedding_dim, hidden_dim);
     defer ff.deinit();
 
-    var buffer = std.ArrayList(u8){};
-    defer buffer.deinit(allocator);
-    const writer = buffer.writer(allocator);
-    try ff.save(writer);
+    var buffer: std.Io.Writer.Allocating = .init(allocator);
+    defer buffer.deinit();
+    try ff.save(&buffer.writer);
 
-    var stream = std.io.fixedBufferStream(buffer.items);
-    const reader = stream.reader();
-    var loaded_ff = try FeedForward.load(allocator, reader);
+    var reader = std.Io.Reader.fixed(buffer.written());
+    var loaded_ff = try FeedForward.load(allocator, &reader);
     defer loaded_ff.deinit();
 
     try std.testing.expectEqual(ff.parameters(), loaded_ff.parameters());

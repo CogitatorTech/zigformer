@@ -98,3 +98,4 @@ docs/api/
 uv.lock
 *.bin
 *.a
+zig-pkg/
