@@ -9,56 +9,9 @@ const Matrix = linalg.Matrix;
 
 /// Parallel matrix multiplication using worker threads.
 ///
-/// Splits the work across multiple threads by dividing rows of the first matrix.
-/// Falls back to sequential execution for small matrices or single thread.
+/// Splits the output rows across up to `num_threads` worker threads.
 pub fn dotParallel(a: *const Matrix, b: *const Matrix, num_threads: usize) !Matrix {
-    std.debug.assert(a.cols == b.rows);
-    var result = try Matrix.init(a.allocator, a.rows, b.cols);
-    errdefer result.deinit();
-    @memset(result.data, 0.0);
-
-    if (num_threads <= 1 or a.rows < num_threads) {
-        // Fall back to sequential computation
-        for (0..a.rows) |i| {
-            for (0..b.cols) |j| {
-                var sum: f32 = 0.0;
-                for (0..a.cols) |k| {
-                    sum += a.at(i, k) * b.at(k, j);
-                }
-                result.set(i, j, sum);
-            }
-        }
-        return result;
-    }
-
-    const rows_per_thread = a.rows / num_threads;
-    const threads = try a.allocator.alloc(std.Thread, num_threads);
-    defer a.allocator.free(threads);
-
-    var spawned: usize = 0;
-    errdefer for (threads[0..spawned]) |thread| thread.join();
-    for (0..num_threads) |thread_id| {
-        const start_row = thread_id * rows_per_thread;
-        const end_row = if (thread_id == num_threads - 1) a.rows else (thread_id + 1) * rows_per_thread;
-
-        threads[thread_id] = try std.Thread.spawn(.{}, computeRows, .{ a, b, &result, start_row, end_row });
-        spawned += 1;
-    }
-
-    for (threads) |thread| thread.join();
-    return result;
-}
-
-fn computeRows(a: *const Matrix, b: *const Matrix, result: *Matrix, start_row: usize, end_row: usize) void {
-    for (start_row..end_row) |i| {
-        for (0..b.cols) |j| {
-            var sum: f32 = 0.0;
-            for (0..a.cols) |k| {
-                sum += a.at(i, k) * b.at(k, j);
-            }
-            result.set(i, j, sum);
-        }
-    }
+    return a.dotWithThreads(b, num_threads);
 }
 
 test "parallel dot correctness" {
@@ -88,10 +41,10 @@ test "parallel dot correctness" {
     }
 }
 
-test "parallel dot with small matrix" {
+test "parallel dot caps workers to row count" {
     const allocator = std.testing.allocator;
 
-    // Small matrix should fall back to sequential
+    // More requested workers than output rows must still produce correct results.
     var a = try Matrix.init(allocator, 2, 3);
     defer a.deinit();
     var b = try Matrix.init(allocator, 3, 2);

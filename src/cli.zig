@@ -222,10 +222,16 @@ fn trainAndMaybeRepl(allocator: std.mem.Allocator, pretrain_path: []const u8, ch
         }
 
         const formatted_input = try std.fmt.allocPrint(allocator, "User: {s}", .{input});
-        const result = try model.predict(formatted_input);
+        defer allocator.free(formatted_input);
+        const result = model.predict(formatted_input) catch |err| {
+            if (err == error.UnknownToken) {
+                std.debug.print("Prompt contains words outside the model vocabulary. Try words from the training data.\n", .{});
+                continue;
+            }
+            return err;
+        };
+        defer allocator.free(result);
         std.debug.print("Model output: {s}\n", .{result});
-        allocator.free(formatted_input);
-        allocator.free(result);
     }
 }
 
