@@ -5,7 +5,7 @@ description = "The Python environment for the ZigFormer project"
 
 requires-python = ">=3.10,<4.0"
 dependencies = [
-    "python-dotenv (>=1.1.0,<2.0.0)",
+    "python-dotenv>=1.1.0",
     "pre-commit>=4.2.0"
 ]
 
