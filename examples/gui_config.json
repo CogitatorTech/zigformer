@@ -1,0 +1,10 @@
+{
+    "port": 8085,
+    "host": "0.0.0.0",
+    "pretrain_path": "datasets/simple_dataset/pretrain.json",
+    "train_path": "datasets/simple_dataset/train.json",
+    "load_model_path": "model.bin",
+    "max_request_size": 1048576,
+    "max_prompt_length": 1000,
+    "timeout_seconds": 30
+}
