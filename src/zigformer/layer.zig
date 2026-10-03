@@ -74,7 +74,7 @@ pub fn toLayer(comptime T: type) fn (ptr: *T) Layer {
                 // Note: self is implicit in struct methods if called as method, but here we check the function type.
                 // T.forward is a function.
                 if (switch (type_info) {
-                    .@"fn" => |f| f.params.len == 3,
+                    .@"fn" => |f| f.param_types.len == 3,
                     else => false,
                 }) {
                     return ptr.forward(input, use_cache);

@@ -60,18 +60,14 @@ pub fn build(b: *std.Build) void {
     // Create a "run-gui" step
     const run_gui_cmd = b.addRunArtifact(gui_exe);
     run_gui_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        run_gui_cmd.addArgs(args);
-    }
+    run_gui_cmd.addPassthruArgs();
     const run_gui_step = b.step("run-gui", "Run the GUI application");
     run_gui_step.dependOn(&run_gui_cmd.step);
 
     // Create a "run" step to execute the application.
     const run_cmd = b.addRunArtifact(exe);
     run_cmd.step.dependOn(b.getInstallStep());
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
+    run_cmd.addPassthruArgs();
     const run_step = b.step("run", "Run the application");
     run_step.dependOn(&run_cmd.step);
 
